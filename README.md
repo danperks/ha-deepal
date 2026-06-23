@@ -1,5 +1,7 @@
 # Changan Deepal Cloud for Home Assistant
 
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
+
 Custom Home Assistant integration for the Changan Deepal cloud API.
 
 This integration was built against a UK-market Deepal S07. At the moment, it should be treated as **S07-only** and **UK-only**. Other models, countries, app regions, and API variants are untested.
@@ -32,11 +34,25 @@ Some controls are still being reverse engineered and may not work reliably on ev
 
 ## Installation
 
+### HACS
+
+1. Open HACS in Home Assistant.
+2. Go to **Integrations**.
+3. Open the three-dot menu and choose **Custom repositories**.
+4. Add `https://github.com/danperks/ha-deepal` as an **Integration** repository.
+5. Install **Deepal / Changan Cloud** from HACS.
+6. Restart Home Assistant.
+
+### Manual
+
 1. Copy `custom_components/deepal` into your Home Assistant `custom_components` directory.
 2. Restart Home Assistant.
-3. Go to **Settings -> Devices & services -> Add integration**.
-4. Search for **Deepal / Changan Cloud**.
-5. Follow the phone/SMS login flow.
+
+## Configuration
+
+[![Open your Home Assistant instance and start setting up Deepal / Changan Cloud.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=deepal)
+
+You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Deepal / Changan Cloud**.
 
 During setup you can choose whether to enable remote commands. Remote commands require the same control PIN used by the official Deepal app.
 
