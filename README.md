@@ -1,4 +1,4 @@
-# Deepal / Changan Cloud for Home Assistant
+# Changan Deepal Cloud for Home Assistant
 
 Custom Home Assistant integration for the Changan Deepal cloud API.
 
