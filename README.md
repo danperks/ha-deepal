@@ -1,5 +1,9 @@
 # Changan Deepal Cloud for Home Assistant
 
+<p align="center">
+  <img src="icon.png" alt="Deepal logo" width="160">
+</p>
+
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
 
 Custom Home Assistant integration for the Changan Deepal cloud API.
@@ -40,7 +44,7 @@ Some controls are still being reverse engineered and may not work reliably on ev
 2. Go to **Integrations**.
 3. Open the three-dot menu and choose **Custom repositories**.
 4. Add `https://github.com/danperks/ha-deepal` as an **Integration** repository.
-5. Install **Deepal / Changan Cloud** from HACS.
+5. Install **Changan Deepal Cloud** from HACS.
 6. Restart Home Assistant.
 
 ### Manual
@@ -50,15 +54,15 @@ Some controls are still being reverse engineered and may not work reliably on ev
 
 ## Configuration
 
-[![Open your Home Assistant instance and start setting up Deepal / Changan Cloud.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=deepal)
+[![Open your Home Assistant instance and start setting up Changan Deepal Cloud.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=deepal)
 
-You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Deepal / Changan Cloud**.
+You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Changan Deepal Cloud**.
 
 During setup you can choose whether to enable remote commands. Remote commands require the same control PIN used by the official Deepal app.
 
 ## Notes
 
-- The integration polls the cloud API every 5 minutes by default.
+- The integration polls cached cloud status every minute and asks for refreshed vehicle data every 5 minutes when remote commands are enabled.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
 

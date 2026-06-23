@@ -98,13 +98,14 @@ class DeepalClimate(DeepalEntity, ClimateEntity):
 
     async def _async_send(self, *, enabled: bool, target_temperature: float) -> None:
         try:
-            command_id = await self.coordinator.client.control_air_conditioner(
-                vehicle_id=self.coordinator.vehicle_id,
-                enabled=enabled,
-                target_temp_c=target_temperature,
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_air_conditioner(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    enabled=enabled,
+                    target_temp_c=target_temperature,
+                )
             )
         except DeepalCommandAuthError as err:
             self.raise_command_reauth_required(err)
         except (DeepalApiError, DeepalCommandNotReady) as err:
             raise HomeAssistantError(f"Deepal AC command failed: {err}") from err
-        await self.async_poll_command_update(command_id)

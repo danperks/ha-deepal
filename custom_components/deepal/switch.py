@@ -52,15 +52,17 @@ class DeepalChargeScheduleSwitch(DeepalEntity, SwitchEntity):
         if not plan:
             raise HomeAssistantError("Deepal charge schedule plan is not available")
         try:
-            command_id = await self.coordinator.client.control_charge_schedule(
-                vehicle_id=self.coordinator.vehicle_id,
-                plan_id=str(plan["planId"]),
-                start_time=str(plan.get("startTime") or "0000"),
-                end_time=str(plan.get("endTime") or "0000"),
-                enabled=enabled,
-                plan_type=int(plan.get("planType") or 1),
-                time_format=int(plan.get("timeFormat") or 1),
-                time_zone=str(plan.get("timeZone") or "GMT+08:00"),
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_charge_schedule(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    plan_id=str(plan["planId"]),
+                    start_time=str(plan.get("startTime") or "0000"),
+                    end_time=str(plan.get("endTime") or "0000"),
+                    enabled=enabled,
+                    plan_type=int(plan.get("planType") or 1),
+                    time_format=int(plan.get("timeFormat") or 1),
+                    time_zone=str(plan.get("timeZone") or "GMT+08:00"),
+                )
             )
         except KeyError as err:
             raise HomeAssistantError("Deepal charge schedule plan id is not available") from err
@@ -68,4 +70,3 @@ class DeepalChargeScheduleSwitch(DeepalEntity, SwitchEntity):
             self.raise_command_reauth_required(err)
         except (DeepalApiError, DeepalCommandNotReady) as err:
             raise HomeAssistantError(f"Deepal charge schedule command failed: {err}") from err
-        await self.async_poll_command_update(command_id)

@@ -1,4 +1,4 @@
-"""Deepal / Changan Cloud integration."""
+"""Changan Deepal Cloud integration."""
 
 from __future__ import annotations
 

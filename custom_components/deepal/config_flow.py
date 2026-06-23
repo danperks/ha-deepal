@@ -1,4 +1,4 @@
-"""Config flow for Deepal / Changan Cloud."""
+"""Config flow for Changan Deepal Cloud."""
 
 from __future__ import annotations
 

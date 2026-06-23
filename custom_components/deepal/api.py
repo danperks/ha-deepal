@@ -1,4 +1,4 @@
-"""Async client for the Deepal / Changan cloud API."""
+"""Async client for the Changan Deepal cloud API."""
 
 from __future__ import annotations
 
@@ -422,6 +422,15 @@ class DeepalClient:
             path="/intl-app-gw/intl-app-car-control/api/control/flashing-honking",
             vehicle_id=vehicle_id,
             payload={"command": "flash_bee", "type": action_type},
+        )
+
+    async def control_condition_inquiry(self, *, vehicle_id: str) -> str:
+        """Ask the vehicle/cloud to fetch fresh condition data."""
+        return await self._signed_command(
+            path="/intl-app-gw/intl-app-car-control/api/control/condition-inquiry",
+            vehicle_id=vehicle_id,
+            payload={"command": "COMMAND_GET_NEW_CONDITION"},
+            sign_omit_keys={"command", "rcToken"},
         )
 
     async def control_result(self, *, vehicle_id: str, command_id: str) -> dict[str, Any]:

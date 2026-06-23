@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from homeassistant.exceptions import HomeAssistantError
@@ -43,36 +42,35 @@ class DeepalEntity(CoordinatorEntity[DeepalDataUpdateCoordinator]):
         self,
         command_id: str,
         *,
+        previous_last_updated: str | None = None,
         is_done: Callable[[], bool] | None = None,
-        timeout: float = 12,
+        timeout: float = 30,
         interval: float = 2,
     ) -> None:
         """Poll command result and refresh vehicle data after a command."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        while True:
-            result: dict[str, Any] = {}
-            try:
-                result = await self.coordinator.client.control_result(
-                    vehicle_id=self.coordinator.vehicle_id,
-                    command_id=command_id,
-                )
-            finally:
-                await self.coordinator.async_request_refresh()
+        await self.coordinator.async_poll_command_update(
+            command_id,
+            previous_last_updated=previous_last_updated or self.coordinator._condition_last_updated(),
+            is_done=is_done,
+            timeout=timeout,
+            interval=interval,
+        )
 
-            if is_done is not None and is_done():
-                return
-
-            result_code = result.get("resultCode")
-            if result_code not in (None, -100):
-                if result_code in (0, 1015):
-                    return
-                raise HomeAssistantError(f"Deepal command failed with result code {result_code}: {result.get('errorMsg')}")
-
-            if loop.time() >= deadline:
-                return
-
-            await asyncio.sleep(interval)
+    async def async_execute_command(
+        self,
+        send_command: Callable[[], Awaitable[str]],
+        *,
+        is_done: Callable[[], bool] | None = None,
+        timeout: float = 30,
+        interval: float = 2,
+    ) -> None:
+        """Send one command and wait until vehicle condition data updates."""
+        await self.coordinator.async_execute_command(
+            send_command,
+            is_done=is_done,
+            timeout=timeout,
+            interval=interval,
+        )
 
     def raise_command_reauth_required(self, err: Exception) -> None:
         """Create a repair issue for command key failures, then raise for the service call."""

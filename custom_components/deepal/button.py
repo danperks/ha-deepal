@@ -36,6 +36,19 @@ class DeepalRefreshButton(DeepalEntity, ButtonEntity):
         super().__init__(coordinator, "refresh")
 
     async def async_press(self) -> None:
+        client = self.coordinator.client
+        if client.commands_enabled:
+            try:
+                await self.async_execute_command(
+                    lambda: client.control_condition_inquiry(vehicle_id=self.coordinator.vehicle_id),
+                    timeout=30,
+                )
+            except DeepalCommandAuthError as err:
+                self.raise_command_reauth_required(err)
+            except DeepalApiError:
+                await self.coordinator.async_request_refresh()
+                return
+            return
         await self.coordinator.async_request_refresh()
 
 
@@ -46,9 +59,11 @@ class _DeepalFlashHonkButton(DeepalEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         try:
-            command_id = await self.coordinator.client.control_flashing_honking(
-                vehicle_id=self.coordinator.vehicle_id,
-                action_type=self._action_type,
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_flashing_honking(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    action_type=self._action_type,
+                )
             )
         except DeepalCommandAuthError as err:
             self.raise_command_reauth_required(err)
@@ -56,7 +71,6 @@ class _DeepalFlashHonkButton(DeepalEntity, ButtonEntity):
             raise HomeAssistantError(str(err)) from err
         except DeepalApiError as err:
             raise HomeAssistantError(f"Deepal command failed: {err}") from err
-        await self.async_poll_command_update(command_id)
 
 
 class DeepalFlashLightsButton(_DeepalFlashHonkButton):

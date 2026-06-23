@@ -34,10 +34,6 @@ class _DeepalOpenCloseCover(DeepalEntity, CoverEntity):
     async def _async_control(self, *, open_value: bool) -> None:
         raise NotImplementedError
 
-    async def _async_finish_command(self, command_id: str) -> None:
-        await self.async_poll_command_update(command_id)
-
-
 class DeepalWindowsCover(_DeepalOpenCloseCover):
     """All-window open/close control."""
 
@@ -57,9 +53,12 @@ class DeepalWindowsCover(_DeepalOpenCloseCover):
 
     async def _async_control(self, *, open_value: bool) -> None:
         try:
-            command_id = await self.coordinator.client.control_windows(
-                vehicle_id=self.coordinator.vehicle_id,
-                open_value=open_value,
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_windows(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    open_value=open_value,
+                ),
+                is_done=lambda: self.is_closed is (not open_value),
             )
         except DeepalCommandAuthError as err:
             self.raise_command_reauth_required(err)
@@ -67,10 +66,6 @@ class DeepalWindowsCover(_DeepalOpenCloseCover):
             raise HomeAssistantError(str(err)) from err
         except DeepalApiError as err:
             raise HomeAssistantError(f"Deepal windows command failed: {err}") from err
-        await self.async_poll_command_update(
-            command_id,
-            is_done=lambda: self.is_closed is (not open_value),
-        )
 
 
 class DeepalBootCover(_DeepalOpenCloseCover):
@@ -90,9 +85,12 @@ class DeepalBootCover(_DeepalOpenCloseCover):
 
     async def _async_control(self, *, open_value: bool) -> None:
         try:
-            command_id = await self.coordinator.client.control_trunk(
-                vehicle_id=self.coordinator.vehicle_id,
-                open_value=open_value,
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_trunk(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    open_value=open_value,
+                ),
+                is_done=lambda: self.is_closed is (not open_value),
             )
         except DeepalCommandAuthError as err:
             self.raise_command_reauth_required(err)
@@ -100,7 +98,3 @@ class DeepalBootCover(_DeepalOpenCloseCover):
             raise HomeAssistantError(str(err)) from err
         except DeepalApiError as err:
             raise HomeAssistantError(f"Deepal boot command failed: {err}") from err
-        await self.async_poll_command_update(
-            command_id,
-            is_done=lambda: self.is_closed is (not open_value),
-        )

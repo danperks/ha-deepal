@@ -42,12 +42,13 @@ class DeepalChargeLimitNumber(DeepalEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         try:
-            command_id = await self.coordinator.client.control_charge_limit(
-                vehicle_id=self.coordinator.vehicle_id,
-                percentage=int(value),
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_charge_limit(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    percentage=int(value),
+                )
             )
         except DeepalCommandAuthError as err:
             self.raise_command_reauth_required(err)
         except (DeepalApiError, DeepalCommandNotReady) as err:
             raise HomeAssistantError(f"Deepal charge limit command failed: {err}") from err
-        await self.async_poll_command_update(command_id)

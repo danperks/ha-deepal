@@ -1,4 +1,4 @@
-"""Constants for the Deepal / Changan Cloud integration."""
+"""Constants for the Changan Deepal Cloud integration."""
 
 from __future__ import annotations
 
@@ -36,7 +36,8 @@ CONF_CAC_USER_ID = "cac_user_id"
 DEFAULT_COUNTRY = "GB"
 DEFAULT_LANGUAGE = "en_US"
 DEFAULT_APP_VERSION = "V1.11.0"
-DEFAULT_SCAN_INTERVAL = 300
+DEFAULT_SCAN_INTERVAL = 60
+ACTIVE_CONDITION_REFRESH_INTERVAL = 300
 
 BASE_URL = "https://m.iov.changanauto.com.de"
 

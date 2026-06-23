@@ -1,6 +1,6 @@
 {
   "domain": "deepal",
-  "name": "Deepal / Changan Cloud",
+  "name": "Changan Deepal Cloud",
   "codeowners": [],
   "config_flow": true,
   "documentation": "https://github.com/danperks/ha-deepal",

@@ -51,10 +51,13 @@ class DeepalDoorLock(DeepalEntity, LockEntity):
     async def _async_control(self, *, command: str, open_value: bool) -> None:
         client = self.coordinator.client
         try:
-            command_id = await client.control_doors(
-                vehicle_id=self.coordinator.vehicle_id,
-                command=command,
-                open_value=open_value,
+            await self.async_execute_command(
+                lambda: client.control_doors(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    command=command,
+                    open_value=open_value,
+                ),
+                is_done=lambda: self.is_locked is (not open_value),
             )
         except DeepalCommandAuthError as err:
             self.raise_command_reauth_required(err)
@@ -62,7 +65,3 @@ class DeepalDoorLock(DeepalEntity, LockEntity):
             raise HomeAssistantError(str(err)) from err
         except DeepalApiError as err:
             raise HomeAssistantError(f"Deepal command failed: {err}") from err
-        await self.async_poll_command_update(
-            command_id,
-            is_done=lambda: self.is_locked is (not open_value),
-        )
