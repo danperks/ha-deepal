@@ -1,0 +1,10 @@
+{
+  "domain": "deepal",
+  "name": "Deepal / Changan Cloud",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/danperks/ha-deepal",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,152 @@
+{
+  "config": {
+    "step": {
+      "phone": {
+        "title": "Phone/SMS login",
+        "description": "Log in with the same phone number you use in the Deepal app. Enter the number in local format; for UK numbers, include the leading 0, for example 079...",
+        "data": {
+          "country": "Country/region",
+          "mobile": "Mobile number"
+        }
+      },
+      "sms": {
+        "title": "Enter SMS code",
+        "description": "Enter the verification code sent by Changan/Deepal. The code can expire quickly, so request a new one if it is rejected.",
+        "data": {
+          "auth_code": "SMS code"
+        }
+      },
+      "commands": {
+        "title": "Remote commands",
+        "description": "Remote commands let Home Assistant control things like climate, charging, locks, and windows. Leave them disabled if you only want read-only vehicle data. The control PIN is the same PIN used for remote controls in the Deepal app.",
+        "data": {
+          "enable_commands": "Enable remote commands",
+          "control_pin": "Control PIN"
+        }
+      }
+    },
+    "error": {
+      "send_code_failed": "Could not request an SMS code. Check the phone number and country/region.",
+      "login_failed": "Login failed. Check the SMS code and phone number format.",
+      "bad_sms_code": "The SMS code was rejected or expired. Request a new code and try again.",
+      "too_many_codes": "Too many verification attempts. Wait a while before requesting another code.",
+      "no_vehicles": "Login succeeded, but no vehicles were returned.",
+      "wrong_account": "Login succeeded, but this account did not return the vehicle already configured in Home Assistant.",
+      "pin_required": "Enter your control PIN, or leave remote commands disabled."
+    },
+    "abort": {
+      "reauth_successful": "Deepal is connected again. Home Assistant will resume refreshing your vehicle data."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Deepal options",
+        "description": "Tune polling and command settings. Remote commands require the control PIN from the Deepal app; leave commands disabled for read-only use.",
+        "data": {
+          "scan_interval": "Polling interval seconds",
+          "control_pin": "Control PIN",
+          "enable_commands": "Enable remote commands"
+        }
+      }
+    }
+  },
+  "issues": {
+    "command_reauth": {
+      "title": "Deepal remote commands need reauthentication",
+      "description": "Deepal accepted the account session and control PIN, but rejected the remote-command signing key. Reauthenticate the Deepal integration so Home Assistant can register a fresh command key."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "soc": {"name": "Battery"},
+      "range": {"name": "Estimated range"},
+      "total_mileage": {"name": "Total mileage"},
+      "speed": {"name": "Speed"},
+      "last_updated": {"name": "Vehicle data timestamp"},
+      "inside_temperature": {"name": "Inside temperature"},
+      "outside_temperature": {"name": "Outside temperature"},
+      "cabin_humidity": {"name": "Cabin humidity"},
+      "inside_pm25": {"name": "Cabin PM2.5"},
+      "inside_air_quality_level": {"name": "Cabin air quality level"},
+      "charge_status": {"name": "Charge status"},
+      "charge_current": {"name": "Reported charge current"},
+      "ac_charge_current": {"name": "AC input current"},
+      "dc_charge_current": {"name": "Battery current"},
+      "remaining_charge_time": {"name": "Remaining charge time"},
+      "charge_limit": {"name": "Charge limit"},
+      "charge_schedule_start_time": {"name": "Charge schedule start time"},
+      "charge_schedule_end_time": {"name": "Charge schedule end time"},
+      "tire_left_front_pressure": {"name": "Left front tire pressure"},
+      "tire_right_front_pressure": {"name": "Right front tire pressure"},
+      "tire_left_rear_pressure": {"name": "Left rear tire pressure"},
+      "tire_right_rear_pressure": {"name": "Right rear tire pressure"},
+      "driver_seat_heater_level": {"name": "Driver seat heater level"},
+      "front_passenger_seat_heater_level": {"name": "Front passenger seat heater level"},
+      "left_rear_seat_heater_level": {"name": "Left rear seat heater level"},
+      "right_rear_seat_heater_level": {"name": "Right rear seat heater level"},
+      "steering_wheel_heater": {"name": "Steering wheel heater"},
+      "vehicle_status": {"name": "Vehicle status"},
+      "power_status": {"name": "Power status"},
+      "gear_signal": {"name": "Gear signal"},
+      "epb_status": {"name": "Electronic parking brake status"},
+      "refresh_failure_count": {"name": "Refresh failure count"},
+      "raw_condition": {"name": "Raw condition data"}
+    },
+    "binary_sensor": {
+      "any_door_open": {"name": "Any door open"},
+      "front_left_door_open": {"name": "Front left door open"},
+      "front_right_door_open": {"name": "Front right door open"},
+      "rear_left_door_open": {"name": "Rear left door open"},
+      "rear_right_door_open": {"name": "Rear right door open"},
+      "trunk_open": {"name": "Trunk open"},
+      "driver_door_locked": {"name": "Driver door locked"},
+      "passenger_door_locked": {"name": "Passenger door locked"},
+      "front_left_window_open": {"name": "Front left window open"},
+      "front_right_window_open": {"name": "Front right window open"},
+      "rear_left_window_open": {"name": "Rear left window open"},
+      "rear_right_window_open": {"name": "Rear right window open"},
+      "charge_cable_connected": {"name": "Charge cable connected"},
+      "dc_charge_gun_connected": {"name": "DC charge gun connected"},
+      "charging": {"name": "Charging"},
+      "charge_schedule_enabled": {"name": "Charge schedule enabled"},
+      "defrost_on": {"name": "Defrost on"},
+      "connected": {"name": "Vehicle connected"},
+      "engine_on": {"name": "Engine on"},
+      "high_beam_on": {"name": "High beam on"},
+      "low_beam_on": {"name": "Low beam on"},
+      "position_lamp_on": {"name": "Position lamp on"},
+      "left_turn_signal_on": {"name": "Left turn signal on"},
+      "right_turn_signal_on": {"name": "Right turn signal on"},
+      "driver_seat_heater_on": {"name": "Driver seat heater on"},
+      "front_passenger_seat_heater_on": {"name": "Front passenger seat heater on"},
+      "driver_seat_ventilation_on": {"name": "Driver seat ventilation on"},
+      "front_passenger_seat_ventilation_on": {"name": "Front passenger seat ventilation on"}
+    },
+    "lock": {
+      "doors": {"name": "Doors"}
+    },
+    "cover": {
+      "windows": {"name": "Windows"},
+      "boot": {"name": "Boot"}
+    },
+    "button": {
+      "refresh": {"name": "Refresh vehicle data"},
+      "flash_lights": {"name": "Flash lights"},
+      "honk_horn": {"name": "Honk horn"}
+    },
+    "climate": {
+      "cabin_climate": {"name": "Cabin climate"}
+    },
+    "number": {
+      "charge_limit_control": {"name": "Charge limit"}
+    },
+    "switch": {
+      "charge_schedule_control": {"name": "Charge schedule"}
+    },
+    "time": {
+      "charge_schedule_start_time": {"name": "Charge schedule start"},
+      "charge_schedule_end_time": {"name": "Charge schedule end"}
+    }
+  }
+}

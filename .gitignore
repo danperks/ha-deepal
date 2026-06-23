@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Home Assistant local/runtime files
+.storage/
+home-assistant.log*
+home-assistant_v2.db*
+*.db
+
+# Local development
+.DS_Store
+.idea/
+.vscode/
+.venv/
+venv/
+
+# Secrets and local config
+secrets.yaml
+known_devices.yaml
+*.pem
+*.key
+*.crt
+*.env
+.env*
+
+# Reverse-engineering captures and temporary probes
+*.mitm
+*.har
+*.pcap
+*.pcapng
+*.jsonl
+captures/
+mitm/
+tmp/
+deepal_*login*
+deepal_*probe*
