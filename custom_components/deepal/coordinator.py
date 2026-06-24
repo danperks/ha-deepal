@@ -16,9 +16,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import DeepalApiError, DeepalAuthError, DeepalClient
 from .const import (
-    ACTIVE_CONDITION_REFRESH_INTERVAL,
     CONF_ACCESS_TOKEN,
+    CONF_ACTIVE_REFRESH_INTERVAL,
     CONF_REFRESH_TOKEN,
+    DEFAULT_ACTIVE_REFRESH_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -84,7 +85,8 @@ class DeepalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if now < self._next_active_refresh_at:
             return
 
-        self._next_active_refresh_at = now + ACTIVE_CONDITION_REFRESH_INTERVAL
+        interval = self.entry.options.get(CONF_ACTIVE_REFRESH_INTERVAL, DEFAULT_ACTIVE_REFRESH_INTERVAL)
+        self._next_active_refresh_at = now + interval
         try:
             await self.async_execute_command(
                 lambda: self.client.control_condition_inquiry(vehicle_id=self.vehicle_id),

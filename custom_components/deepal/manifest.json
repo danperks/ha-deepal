@@ -1,10 +1,11 @@
 {
   "domain": "deepal",
   "name": "Changan Deepal Cloud",
-  "codeowners": [],
+  "codeowners": ["@danperks"],
   "config_flow": true,
   "documentation": "https://github.com/danperks/ha-deepal",
+  "issue_tracker": "https://github.com/danperks/ha-deepal/issues",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

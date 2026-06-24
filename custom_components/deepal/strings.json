@@ -41,12 +41,19 @@
   "options": {
     "step": {
       "init": {
-        "title": "Deepal options",
-        "description": "Tune polling and command settings. Remote commands require the control PIN from the Deepal app; leave commands disabled for read-only use.",
+        "title": "Changan Deepal Cloud options",
+        "description": "Tune how often Home Assistant reads cached cloud data and how often it asks the vehicle for fresh data. Remote commands require the control PIN from the Deepal app.",
         "data": {
-          "scan_interval": "Polling interval seconds",
+          "scan_interval": "Status poll interval",
+          "active_refresh_interval": "Vehicle refresh interval",
           "control_pin": "Control PIN",
           "enable_commands": "Enable remote commands"
+        },
+        "data_description": {
+          "scan_interval": "How often Home Assistant polls the cached cloud status. This is lightweight and does not wake or actively query the car.",
+          "active_refresh_interval": "How often Home Assistant sends the signed refresh command that asks the cloud/car for newer vehicle data. Only used when remote commands are enabled.",
+          "control_pin": "The same PIN used for remote controls in the official Deepal app. Required when remote commands are enabled.",
+          "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, lights, and horn."
         }
       }
     }
@@ -66,6 +73,7 @@
       "last_updated": {"name": "Vehicle data timestamp"},
       "inside_temperature": {"name": "Inside temperature"},
       "outside_temperature": {"name": "Outside temperature"},
+      "cabin_climate_mode": {"name": "Cabin climate mode"},
       "cabin_humidity": {"name": "Cabin humidity"},
       "inside_pm25": {"name": "Cabin PM2.5"},
       "inside_air_quality_level": {"name": "Cabin air quality level"},

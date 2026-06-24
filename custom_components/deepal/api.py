@@ -352,6 +352,7 @@ class DeepalClient:
                 "targetTemp": int(round(target_temp_c * 10)),
                 "windMode": wind_mode,
             },
+            sign_omit_keys={"command", "rcToken"},
         )
 
     async def control_charge_limit(self, *, vehicle_id: str, percentage: int) -> str:

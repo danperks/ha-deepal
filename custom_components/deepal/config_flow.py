@@ -10,11 +10,13 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import DeepalApiError, DeepalClient, DeepalRateLimitError
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_ACTIVE_REFRESH_INTERVAL,
     CONF_APP_VERSION,
     CONF_CAC_TOKEN,
     CONF_CAC_USER_ID,
@@ -30,6 +32,7 @@ from .const import (
     CONF_USER_ID,
     CONF_VEHICLE_ID,
     DEFAULT_APP_VERSION,
+    DEFAULT_ACTIVE_REFRESH_INTERVAL,
     DEFAULT_COUNTRY,
     DEFAULT_LANGUAGE,
     DEFAULT_SCAN_INTERVAL,
@@ -266,7 +269,24 @@ class DeepalOptionsFlow(config_entries.OptionsFlow):
         data = self.config_entry.data | self.config_entry.options
         schema = vol.Schema(
             {
-                vol.Optional(CONF_SCAN_INTERVAL, default=data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+                vol.Optional(CONF_SCAN_INTERVAL, default=data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=30,
+                        max=3600,
+                        mode=selector.NumberSelectorMode.BOX,
+                        step=1,
+                        unit_of_measurement="s",
+                    )
+                ),
+                vol.Optional(CONF_ACTIVE_REFRESH_INTERVAL, default=data.get(CONF_ACTIVE_REFRESH_INTERVAL, DEFAULT_ACTIVE_REFRESH_INTERVAL)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=60,
+                        max=3600,
+                        mode=selector.NumberSelectorMode.BOX,
+                        step=1,
+                        unit_of_measurement="s",
+                    )
+                ),
                 vol.Optional(CONF_CONTROL_PIN, default=data.get(CONF_CONTROL_PIN, "")): str,
                 vol.Optional(CONF_ENABLE_COMMANDS, default=data.get(CONF_ENABLE_COMMANDS, False)): bool,
             }

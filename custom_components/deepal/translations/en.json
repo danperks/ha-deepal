@@ -1,0 +1,67 @@
+{
+  "config": {
+    "step": {
+      "phone": {
+        "title": "Phone/SMS login",
+        "description": "Log in with the same phone number you use in the Deepal app. Enter the number in local format; for UK numbers, include the leading 0, for example 079...",
+        "data": {
+          "country": "Country/region",
+          "mobile": "Mobile number"
+        }
+      },
+      "sms": {
+        "title": "Enter SMS code",
+        "description": "Enter the verification code sent by Changan/Deepal. The code can expire quickly, so request a new one if it is rejected.",
+        "data": {
+          "auth_code": "SMS code"
+        }
+      },
+      "commands": {
+        "title": "Remote commands",
+        "description": "Remote commands let Home Assistant control things like climate, charging, locks, and windows. Leave them disabled if you only want read-only vehicle data. The control PIN is the same PIN used for remote controls in the Deepal app.",
+        "data": {
+          "enable_commands": "Enable remote commands",
+          "control_pin": "Control PIN"
+        }
+      }
+    },
+    "error": {
+      "send_code_failed": "Could not request an SMS code. Check the phone number and country/region.",
+      "login_failed": "Login failed. Check the SMS code and phone number format.",
+      "bad_sms_code": "The SMS code was rejected or expired. Request a new code and try again.",
+      "too_many_codes": "Too many verification attempts. Wait a while before requesting another code.",
+      "no_vehicles": "Login succeeded, but no vehicles were returned.",
+      "wrong_account": "Login succeeded, but this account did not return the vehicle already configured in Home Assistant.",
+      "pin_required": "Enter your control PIN, or leave remote commands disabled."
+    },
+    "abort": {
+      "reauth_successful": "Deepal is connected again. Home Assistant will resume refreshing your vehicle data."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Changan Deepal Cloud options",
+        "description": "Tune how often Home Assistant reads cached cloud data and how often it asks the vehicle for fresh data. Remote commands require the control PIN from the Deepal app.",
+        "data": {
+          "scan_interval": "Status poll interval",
+          "active_refresh_interval": "Vehicle refresh interval",
+          "control_pin": "Control PIN",
+          "enable_commands": "Enable remote commands"
+        },
+        "data_description": {
+          "scan_interval": "How often Home Assistant polls the cached cloud status. This is lightweight and does not wake or actively query the car.",
+          "active_refresh_interval": "How often Home Assistant sends the signed refresh command that asks the cloud/car for newer vehicle data. Only used when remote commands are enabled.",
+          "control_pin": "The same PIN used for remote controls in the official Deepal app. Required when remote commands are enabled.",
+          "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, lights, and horn."
+        }
+      }
+    }
+  },
+  "issues": {
+    "command_reauth": {
+      "title": "Deepal remote commands need reauthentication",
+      "description": "Deepal accepted the account session and control PIN, but rejected the remote-command signing key. Reauthenticate the Deepal integration so Home Assistant can register a fresh command key."
+    }
+  }
+}

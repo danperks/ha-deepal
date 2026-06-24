@@ -66,6 +66,7 @@ class DeepalSensorDescription(SensorEntityDescription):
     path: tuple[str | int, ...]
     divide_by: float | None = None
     timestamp_ms: bool = False
+    options: list[str] | None = None
 
 
 SENSOR_NAMES = {
@@ -76,6 +77,7 @@ SENSOR_NAMES = {
     "last_updated": "Vehicle data timestamp",
     "inside_temperature": "Inside temperature",
     "outside_temperature": "Outside temperature",
+    "cabin_climate_mode": "Cabin climate mode",
     "cabin_humidity": "Cabin humidity",
     "inside_pm25": "Cabin PM2.5",
     "inside_air_quality_level": "Cabin air quality level",
@@ -162,6 +164,13 @@ SENSORS: tuple[DeepalSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         path=("hvac", "outsideTemp"),
         divide_by=10,
+    ),
+    DeepalSensorDescription(
+        key="cabin_climate_mode",
+        translation_key="cabin_climate_mode",
+        device_class=SensorDeviceClass.ENUM,
+        path=(),
+        options=["off", "heat_cool"],
     ),
     DeepalSensorDescription(
         key="cabin_humidity",
@@ -346,9 +355,13 @@ class DeepalSensor(DeepalEntity, SensorEntity):
         super().__init__(coordinator, description.key)
         self.entity_description = description
         self._attr_name = SENSOR_NAMES.get(description.key)
+        if description.options:
+            self._attr_options = description.options
 
     @property
     def native_value(self) -> Any:
+        if self.entity_description.key == "cabin_climate_mode":
+            return _cabin_climate_mode_state(self.condition)
         if self.entity_description.key == "charge_schedule_start_time":
             return _format_hhmm(_charge_schedule(self.condition).get("startTime"))
         if self.entity_description.key == "charge_schedule_end_time":
@@ -368,6 +381,12 @@ class DeepalSensor(DeepalEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.entity_description.key == "refresh_failure_count":
             return {"last_failure": self.coordinator.last_refresh_failure}
+        if self.entity_description.key == "cabin_climate_mode":
+            hvac = self.condition.get("hvac") or {}
+            return {
+                "raw_ac_status": hvac.get("acStatus"),
+                "target_temperature": _temp_value(self.condition, ("hvac", "remoteTemp")),
+            }
         if self.entity_description.key in ("charge_schedule_start_time", "charge_schedule_end_time"):
             return _charge_schedule_attributes(self.condition)
         if self.entity_description.key == "steering_wheel_heater":
@@ -416,6 +435,13 @@ def _steering_wheel_heater_state(data: dict[str, Any]) -> str | None:
     if level == 3:
         return "High"
     return None
+
+
+def _cabin_climate_mode_state(data: dict[str, Any]) -> str | None:
+    ac_status = (data.get("hvac") or {}).get("acStatus")
+    if ac_status is None:
+        return None
+    return "off" if ac_status == 0 else "heat_cool"
 
 
 def _charge_schedule_attributes(data: dict[str, Any]) -> dict[str, Any]:
