@@ -3,7 +3,7 @@
     "step": {
       "phone": {
         "title": "Phone/SMS login",
-        "description": "Log in with the same phone number you use in the Deepal app. Enter the number in local format; for UK numbers, include the leading 0, for example 079...",
+        "description": "Log in with the same phone number you use in the Deepal app. Choose your country/region, then enter the local number without the international prefix. For UK numbers, include the leading 0, for example 079... For Portugal, enter the 9-digit number, for example 912345678.",
         "data": {
           "country": "Country/region",
           "mobile": "Mobile number"

@@ -41,10 +41,12 @@ from .const import (
 
 COUNTRY_OPTIONS = {
     "GB": "United Kingdom (+44)",
+    "PT": "Portugal (+351)",
 }
 
 COUNTRY_DIAL_CODES = {
     "GB": "44",
+    "PT": "351",
 }
 
 

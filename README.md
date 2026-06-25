@@ -8,7 +8,7 @@
 
 Custom Home Assistant integration for the Changan Deepal cloud API.
 
-This integration was built against a UK-market Deepal S07. At the moment, it should be treated as **S07-only** and **UK-only**. Other models, countries, app regions, and API variants are untested.
+This integration was built against a UK-market Deepal S07. At the moment, it should be treated as **S07-only**. Login is supported for UK and Portugal accounts, but Portugal support is newly added and needs wider testing. Other models, countries, app regions, and API variants are untested.
 
 ## Important Warnings
 
@@ -20,7 +20,8 @@ This integration was built against a UK-market Deepal S07. At the moment, it sho
 
 ## Supported Vehicle
 
-- Deepal S07, UK market
+- Deepal S07
+- Login regions: United Kingdom, Portugal
 
 ## Current Features
 
