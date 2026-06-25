@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +14,108 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from .const import BASE_URL, REQUEST_ENCRYPTION_PUBLIC_KEY
+
+_LOGGER = logging.getLogger(__name__)
+
+_REDACTED = "[redacted]"
+_MAX_LOG_STRING_LENGTH = 500
+_SAFE_LOG_HEADER_KEYS = ("selectcountry", "appversion", "language")
+_SENSITIVE_EXACT_KEYS = {
+    "access_token",
+    "authcode",
+    "authorization",
+    "bearer",
+    "cactoken",
+    "cacuserid",
+    "cacuser_id",
+    "cac_token",
+    "causerid",
+    "ca_user_id",
+    "control_pin",
+    "cookie",
+    "deviceid",
+    "email",
+    "hwi",
+    "hwid",
+    "hw_id",
+    "mobile",
+    "password",
+    "phone",
+    "private_key_pem",
+    "privatekey",
+    "public_key",
+    "pubkey",
+    "publickey",
+    "rctoken",
+    "refresh_token",
+    "refreshtoken",
+    "safecode",
+    "seriralno",
+    "serial",
+    "sign",
+    "signature",
+    "sms",
+    "token",
+    "userid",
+    "user_id",
+    "vehicleid",
+    "vin",
+}
+_SENSITIVE_KEY_PARTS = (
+    "authorization",
+    "bearer",
+    "cookie",
+    "email",
+    "key",
+    "mobile",
+    "password",
+    "pem",
+    "phone",
+    "pin",
+    "rctoken",
+    "serial",
+    "signature",
+    "sms",
+    "token",
+    "vehicleid",
+    "vin",
+)
+
+
+def _is_sensitive_log_key(key: Any) -> bool:
+    """Return whether a JSON/header key should never be logged raw."""
+    normalized = str(key).lower().replace("-", "_")
+    compact = normalized.replace("_", "")
+    return (
+        normalized in _SENSITIVE_EXACT_KEYS
+        or compact in _SENSITIVE_EXACT_KEYS
+        or any(part in compact for part in _SENSITIVE_KEY_PARTS)
+    )
+
+
+def _redact_for_log(value: Any) -> Any:
+    """Return a redacted, log-safe copy of an API payload."""
+    if isinstance(value, dict):
+        return {
+            key: _REDACTED if _is_sensitive_log_key(key) else _redact_for_log(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_for_log(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_for_log(item) for item in value)
+    if isinstance(value, str):
+        if len(value) > _MAX_LOG_STRING_LENGTH:
+            return f"{value[:_MAX_LOG_STRING_LENGTH]}...[truncated {len(value) - _MAX_LOG_STRING_LENGTH} chars]"
+        return value
+    if isinstance(value, bytes):
+        return f"<{len(value)} bytes>"
+    return value
+
+
+def _safe_log_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Return only non-sensitive headers useful for debugging country/region behavior."""
+    return {key: headers[key] for key in _SAFE_LOG_HEADER_KEYS if key in headers}
 
 
 class DeepalApiError(Exception):
@@ -57,6 +161,7 @@ class DeepalClient:
         device_id: str,
         private_key_pem: str | None = None,
         enable_commands: bool = False,
+        enable_api_logging: bool = False,
         rc_token: str | None = None,
         control_pin: str | None = None,
         cac_token: str | None = None,
@@ -68,6 +173,7 @@ class DeepalClient:
         self.app_version = app_version
         self.device_id = device_id
         self.enable_commands = enable_commands
+        self.enable_api_logging = enable_api_logging
         self.rc_token = rc_token
         self.control_pin = control_pin
         self.cac_token = cac_token
@@ -137,22 +243,57 @@ class DeepalClient:
 
     async def _post(self, path: str, payload: dict[str, Any] | None = None, *, include_auth: bool = True) -> Any:
         url = f"{BASE_URL}{path}"
+        headers = self._headers(include_auth=include_auth)
+        started_at = time.monotonic()
         try:
-            body = json.dumps(payload or {}, separators=(",", ":"), ensure_ascii=False)
+            request_payload = payload or {}
+            if self.enable_api_logging:
+                _LOGGER.warning(
+                    "Deepal API debug request path=%s headers=%s payload=%s",
+                    path,
+                    _safe_log_headers(headers),
+                    _redact_for_log(request_payload),
+                )
+            request_body = json.dumps(request_payload, separators=(",", ":"), ensure_ascii=False)
             async with self._session.post(
                 url,
-                data=body,
-                headers=self._headers(include_auth=include_auth),
+                data=request_body,
+                headers=headers,
                 timeout=30,
             ) as resp:
+                status = resp.status
                 resp.raise_for_status()
                 body = await resp.json(content_type=None)
         except ClientResponseError as err:
+            if self.enable_api_logging:
+                _LOGGER.warning(
+                    "Deepal API debug HTTP error path=%s status=%s elapsed=%.3fs error=%s",
+                    path,
+                    err.status,
+                    time.monotonic() - started_at,
+                    type(err).__name__,
+                )
             if err.status in (401, 403):
                 raise DeepalAuthError(f"Deepal auth failed: HTTP {err.status}") from err
             raise DeepalApiError(f"Deepal HTTP error {err.status} for {path}") from err
         except (ClientError, TimeoutError) as err:
+            if self.enable_api_logging:
+                _LOGGER.warning(
+                    "Deepal API debug request error path=%s elapsed=%.3fs error=%s",
+                    path,
+                    time.monotonic() - started_at,
+                    type(err).__name__,
+                )
             raise DeepalApiError(f"Deepal request failed for {path}: {err}") from err
+
+        if self.enable_api_logging:
+            _LOGGER.warning(
+                "Deepal API debug response path=%s status=%s elapsed=%.3fs body=%s",
+                path,
+                status,
+                time.monotonic() - started_at,
+                _redact_for_log(body),
+            )
 
         if not isinstance(body, dict):
             raise DeepalApiError(f"Unexpected Deepal response for {path}: {type(body).__name__}")
@@ -201,6 +342,17 @@ class DeepalClient:
             include_auth=False,
         )
 
+    async def send_email_auth_code(self, *, email: str) -> None:
+        """Request an email login code."""
+        await self._post(
+            "/intl-app-gw/intl-app-auth/api/login/email-send-auth-code",
+            {
+                "type": "0",
+                "email": self.encrypt_request_value(email),
+            },
+            include_auth=False,
+        )
+
     async def login_by_mobile_code(
         self,
         *,
@@ -218,6 +370,31 @@ class DeepalClient:
                 "countryCode": country_code,
                 "mobile": self.encrypt_request_value(mobile),
                 "salesCountry": sales_country,
+                "pubKey": pub_key,
+            },
+            include_auth=False,
+        )
+        if not isinstance(data, dict) or not data.get("token"):
+            raise DeepalAuthError("Login response did not include a token")
+        self.tokens = DeepalTokens(str(data["token"]), data.get("refreshToken"))
+        self.cac_token = data.get("cacToken")
+        return data
+
+    async def login_by_email_code(
+        self,
+        *,
+        email: str,
+        auth_code: str,
+        sales_country: str,
+        pub_key: str,
+    ) -> dict[str, Any]:
+        """Login using an email verification code and a generated command-signing public key."""
+        data = await self._post(
+            "/intl-app-gw/intl-app-auth/api/login/email-code-in",
+            {
+                "authCode": auth_code,
+                "salesCountry": sales_country,
+                "email": self.encrypt_request_value(email),
                 "pubKey": pub_key,
             },
             include_auth=False,

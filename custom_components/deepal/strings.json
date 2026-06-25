@@ -1,6 +1,28 @@
 {
   "config": {
     "step": {
+      "user": {
+        "title": "Login method",
+        "description": "Choose the same login method you use in the official Deepal app. Email-code login is recommended where phone/SMS login does not find the account.",
+        "data": {
+          "login_method": "Login method"
+        }
+      },
+      "email": {
+        "title": "Email login",
+        "description": "Enter the email address used by the official Deepal app. Changan/Deepal will send a one-time verification code to this address.",
+        "data": {
+          "country": "Country/region",
+          "email": "Email address"
+        }
+      },
+      "email_code": {
+        "title": "Enter email code",
+        "description": "Enter the verification code sent by Changan/Deepal. The code can expire quickly, so request a new one if it is rejected.",
+        "data": {
+          "auth_code": "Email code"
+        }
+      },
       "phone": {
         "title": "Phone/SMS login",
         "description": "Log in with the same phone number you use in the Deepal app. Choose your country/region, then enter the local number without the international prefix. For UK numbers, include the leading 0, for example 079... For Portugal, enter the 9-digit number, for example 912345678.",
@@ -27,8 +49,11 @@
     },
     "error": {
       "send_code_failed": "Could not request an SMS code. Check the phone number and country/region.",
-      "login_failed": "Login failed. Check the SMS code and phone number format.",
+      "send_email_code_failed": "Could not request an email code. Check the email address and country/region.",
+      "account_not_registered": "Deepal says this account is not registered for the selected country/region. Choose the region used by the official app account, or try the other login method.",
+      "login_failed": "Login failed. Check the verification code and account details.",
       "bad_sms_code": "The SMS code was rejected or expired. Request a new code and try again.",
+      "bad_email_code": "The email code was rejected or expired. Request a new code and try again.",
       "too_many_codes": "Too many verification attempts. Wait a while before requesting another code.",
       "no_vehicles": "Login succeeded, but no vehicles were returned.",
       "wrong_account": "Login succeeded, but this account did not return the vehicle already configured in Home Assistant.",
@@ -47,13 +72,15 @@
           "scan_interval": "Status poll interval",
           "active_refresh_interval": "Vehicle refresh interval",
           "control_pin": "Control PIN",
-          "enable_commands": "Enable remote commands"
+          "enable_commands": "Enable remote commands",
+          "enable_api_logging": "Enable redacted API logging"
         },
         "data_description": {
           "scan_interval": "How often Home Assistant polls the cached cloud status. This is lightweight and does not wake or actively query the car.",
           "active_refresh_interval": "How often Home Assistant sends the signed refresh command that asks the cloud/car for newer vehicle data. Only used when remote commands are enabled.",
           "control_pin": "The same PIN used for remote controls in the official Deepal app. Required when remote commands are enabled.",
-          "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, lights, and horn."
+          "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, lights, and horn.",
+          "enable_api_logging": "Write redacted Deepal API requests and responses to the Home Assistant log for troubleshooting. Tokens, PINs, signatures, keys, and account identifiers are filtered, but vehicle data may still appear. Leave disabled unless debugging."
         }
       }
     }

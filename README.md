@@ -25,7 +25,7 @@ This integration was built against a UK-market Deepal S07. At the moment, it sho
 
 ## Current Features
 
-- Phone/SMS login flow through Home Assistant.
+- Email-code and phone/SMS login flows through Home Assistant.
 - Native Home Assistant reauthentication/repair flow when the cloud session is invalidated.
 - Vehicle telemetry sensors and binary sensors.
 - Manual refresh button.
@@ -59,7 +59,7 @@ Some controls are still being reverse engineered and may not work reliably on ev
 
 You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Changan Deepal Cloud**.
 
-During setup you can choose whether to enable remote commands. Remote commands require the same control PIN used by the official Deepal app.
+During setup, choose the same login method you use in the official Deepal app. If phone/SMS login says the account is not registered, try email-code login instead. You can also choose whether to enable remote commands; remote commands require the same control PIN used by the official Deepal app.
 
 ## Notes
 
