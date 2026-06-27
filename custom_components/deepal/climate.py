@@ -31,7 +31,6 @@ class DeepalClimate(DeepalEntity, ClimateEntity):
     _attr_translation_key = "cabin_climate"
     _attr_name = "Cabin climate"
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT_COOL]
-    _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_target_temperature_step = 0.5
     _attr_min_temp = 16
     _attr_max_temp = 30
@@ -42,6 +41,14 @@ class DeepalClimate(DeepalEntity, ClimateEntity):
     @property
     def temperature_unit(self) -> str:
         return UnitOfTemperature.CELSIUS
+
+    @property
+    def supported_features(self) -> ClimateEntityFeature:
+        return (
+            ClimateEntityFeature(0)
+            if self.coordinator.vehicle_uses_mqtt
+            else ClimateEntityFeature.TARGET_TEMPERATURE
+        )
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -76,12 +83,14 @@ class DeepalClimate(DeepalEntity, ClimateEntity):
         }
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
+        self._raise_if_read_only()
         temperature = kwargs.get("temperature")
         if temperature is None:
             return
         await self._async_send(enabled=True, target_temperature=float(temperature))
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        self._raise_if_read_only()
         if hvac_mode == HVACMode.OFF:
             await self.async_turn_off()
             return
@@ -91,10 +100,16 @@ class DeepalClimate(DeepalEntity, ClimateEntity):
         raise HomeAssistantError(f"Unsupported HVAC mode: {hvac_mode}")
 
     async def async_turn_on(self) -> None:
+        self._raise_if_read_only()
         await self._async_send(enabled=True, target_temperature=self.target_temperature or 21)
 
     async def async_turn_off(self) -> None:
+        self._raise_if_read_only()
         await self._async_send(enabled=False, target_temperature=self.target_temperature or 21)
+
+    def _raise_if_read_only(self) -> None:
+        if self.coordinator.vehicle_uses_mqtt:
+            raise HomeAssistantError("S05 MQTT vehicles are read-only in this version")
 
     async def _async_send(self, *, enabled: bool, target_temperature: float) -> None:
         try:

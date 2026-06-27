@@ -40,7 +40,7 @@
       },
       "commands": {
         "title": "Remote commands",
-        "description": "Remote commands let Home Assistant control things like climate, charging, locks, and windows. Leave them disabled if you only want read-only vehicle data. The control PIN is the same PIN used for remote controls in the Deepal app.",
+        "description": "For supported vehicles, remote commands let Home Assistant control things like climate, charging, locks, and windows. Leave them disabled if you only want read-only vehicle data. S05 support is read-only in this version. The control PIN is the same PIN used for remote controls in the Deepal app.",
         "data": {
           "enable_commands": "Enable remote commands",
           "control_pin": "Control PIN"
@@ -67,7 +67,7 @@
     "step": {
       "init": {
         "title": "Changan Deepal Cloud options",
-        "description": "Tune how often Home Assistant reads cached cloud data and how often it asks the vehicle for fresh data. Remote commands require the control PIN from the Deepal app.",
+        "description": "Tune how often Home Assistant reads cached cloud data and how often it asks the vehicle for fresh data. Remote commands require the control PIN from the Deepal app. S05 support is read-only in this version.",
         "data": {
           "scan_interval": "Status poll interval",
           "active_refresh_interval": "Vehicle refresh interval",

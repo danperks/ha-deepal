@@ -11,6 +11,8 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_APP_VERSION,
     CONF_CAC_TOKEN,
+    CONF_CAC_USER_ID,
+    CONF_CA_USER_ID,
     CONF_COUNTRY,
     CONF_CONTROL_PIN,
     CONF_DEVICE_ID,
@@ -20,6 +22,7 @@ from .const import (
     CONF_PRIVATE_KEY,
     CONF_RC_TOKEN,
     CONF_REFRESH_TOKEN,
+    CONF_USER_ID,
     CONF_VEHICLE_ID,
     DEFAULT_APP_VERSION,
     DEFAULT_COUNTRY,
@@ -48,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         rc_token=data.get(CONF_RC_TOKEN),
         control_pin=data.get(CONF_CONTROL_PIN),
         cac_token=data.get(CONF_CAC_TOKEN),
+        user_id=data.get(CONF_USER_ID) or data.get(CONF_CA_USER_ID) or data.get(CONF_CAC_USER_ID),
     )
     coordinator = DeepalDataUpdateCoordinator(hass, entry, client, str(data[CONF_VEHICLE_ID]))
     await coordinator.async_config_entry_first_refresh()

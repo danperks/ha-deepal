@@ -18,6 +18,8 @@ from .entity import DeepalEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DeepalDataUpdateCoordinator = entry.runtime_data
+    if coordinator.vehicle_uses_mqtt:
+        return
     async_add_entities([DeepalChargeLimitNumber(coordinator)])
 
 

@@ -102,6 +102,7 @@ SENSOR_NAMES = {
     "power_status": "Power status",
     "gear_signal": "Gear signal",
     "epb_status": "Electronic parking brake status",
+    "vehicle_image_url": "Vehicle image URL",
     "refresh_failure_count": "Refresh failure count",
 }
 
@@ -336,6 +337,12 @@ SENSORS: tuple[DeepalSensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         path=(),
     ),
+    DeepalSensorDescription(
+        key="vehicle_image_url",
+        translation_key="vehicle_image_url",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        path=(),
+    ),
 )
 
 
@@ -370,6 +377,8 @@ class DeepalSensor(DeepalEntity, SensorEntity):
             return _steering_wheel_heater_state(self.condition)
         if self.entity_description.key == "refresh_failure_count":
             return self.coordinator.refresh_failure_count
+        if self.entity_description.key == "vehicle_image_url":
+            return ((self.coordinator.data or {}).get("vehicle") or {}).get("imgUrl")
         if self.entity_description.timestamp_ms:
             return _millis_to_datetime(_path_value(self.condition, self.entity_description.path))
         value = _path_value(self.condition, self.entity_description.path)
@@ -381,6 +390,12 @@ class DeepalSensor(DeepalEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         if self.entity_description.key == "refresh_failure_count":
             return {"last_failure": self.coordinator.last_refresh_failure}
+        if self.entity_description.key == "vehicle_image_url":
+            vehicle = ((self.coordinator.data or {}).get("vehicle") or {})
+            return {
+                "series": vehicle.get("seriesName") or vehicle.get("seriesCode"),
+                "model": vehicle.get("modelName") or vehicle.get("modelCode"),
+            }
         if self.entity_description.key == "cabin_climate_mode":
             hvac = self.condition.get("hvac") or {}
             return {

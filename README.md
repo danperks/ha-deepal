@@ -8,7 +8,7 @@
 
 Custom Home Assistant integration for the Changan Deepal cloud API.
 
-This integration was built against a UK-market Deepal S07. At the moment, it should be treated as **S07-only**. Login is supported for UK and Portugal accounts, but Portugal support is newly added and needs wider testing. Other models, countries, app regions, and API variants are untested.
+This integration was built against a UK-market Deepal S07 and a Portugal-market Deepal S05. S07 support includes telemetry and remote controls when enabled. S05 support is currently **read-only** via the app's MQTT telemetry path.
 
 ## Important Warnings
 
@@ -20,7 +20,8 @@ This integration was built against a UK-market Deepal S07. At the moment, it sho
 
 ## Supported Vehicle
 
-- Deepal S07
+- Deepal S07: telemetry and optional remote controls.
+- Deepal S05: read-only telemetry.
 - Login regions: United Kingdom, Portugal
 
 ## Current Features
@@ -28,14 +29,15 @@ This integration was built against a UK-market Deepal S07. At the moment, it sho
 - Email-code and phone/SMS login flows through Home Assistant.
 - Native Home Assistant reauthentication/repair flow when the cloud session is invalidated.
 - Vehicle telemetry sensors and binary sensors.
+- Vehicle image URL sensor from the Deepal vehicle metadata.
 - Manual refresh button.
-- Cabin climate entity.
-- Charge limit and charging schedule controls.
-- Door lock control.
-- Window and boot cover controls.
-- Flash lights and horn buttons.
+- Cabin climate entity. S05 is state-only in this version.
+- S07 charge limit and charging schedule controls.
+- S07 door lock control.
+- S07 window and boot cover controls.
+- S07 flash lights and horn buttons.
 
-Some controls are still being reverse engineered and may not work reliably on every vehicle/app session.
+S05 controls are still being reverse engineered and are intentionally not exposed in this read-only release.
 
 ## Installation
 
@@ -59,11 +61,11 @@ Some controls are still being reverse engineered and may not work reliably on ev
 
 You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Changan Deepal Cloud**.
 
-During setup, choose the same login method you use in the official Deepal app. If phone/SMS login says the account is not registered, try email-code login instead. You can also choose whether to enable remote commands; remote commands require the same control PIN used by the official Deepal app.
+During setup, choose the same login method you use in the official Deepal app. If phone/SMS login says the account is not registered, try email-code login instead. S07 users can choose whether to enable remote commands; remote commands require the same control PIN used by the official Deepal app. S05 entries are created read-only.
 
 ## Notes
 
-- The integration polls cached cloud status every minute and asks for refreshed vehicle data every 5 minutes when remote commands are enabled.
+- The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry without exposing vehicle controls.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
 

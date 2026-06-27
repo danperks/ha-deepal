@@ -44,6 +44,7 @@ DEFAULT_SCAN_INTERVAL = 60
 DEFAULT_ACTIVE_REFRESH_INTERVAL = 300
 
 BASE_URL = "https://m.iov.changanauto.com.de"
+CA_BASE_URL = "https://ca-m.iov.changanauto.com.de"
 
 # 2048-bit RSA public key used by the app to encrypt mobile/password/control PIN fields.
 # Extracted from the live app's Dalvik heap and validated against send-auth-code:

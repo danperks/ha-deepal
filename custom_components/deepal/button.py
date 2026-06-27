@@ -16,13 +16,10 @@ from .entity import DeepalEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DeepalDataUpdateCoordinator = entry.runtime_data
-    async_add_entities(
-        [
-            DeepalRefreshButton(coordinator),
-            DeepalFlashLightsButton(coordinator),
-            DeepalHonkHornButton(coordinator),
-        ]
-    )
+    entities: list[ButtonEntity] = [DeepalRefreshButton(coordinator)]
+    if not coordinator.vehicle_uses_mqtt:
+        entities.extend([DeepalFlashLightsButton(coordinator), DeepalHonkHornButton(coordinator)])
+    async_add_entities(entities)
 
 
 class DeepalRefreshButton(DeepalEntity, ButtonEntity):
@@ -37,7 +34,7 @@ class DeepalRefreshButton(DeepalEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         client = self.coordinator.client
-        if client.commands_enabled:
+        if client.commands_enabled and not self.coordinator.vehicle_uses_mqtt:
             try:
                 await self.async_execute_command(
                     lambda: client.control_condition_inquiry(vehicle_id=self.coordinator.vehicle_id),

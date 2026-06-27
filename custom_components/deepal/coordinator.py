@@ -47,7 +47,6 @@ class DeepalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
-            await self._async_maybe_active_condition_refresh()
             vehicles, condition = await self._async_fetch()
         except DeepalAuthError as err:
             try:
@@ -66,14 +65,34 @@ class DeepalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(str(err)) from err
 
         self.last_refresh_failure = None
-        vehicle = next((item for item in vehicles if str(item.get("carId")) == self.vehicle_id), None)
+        vehicle = self._vehicle_from_list(vehicles)
         return {"vehicles": vehicles, "vehicle": vehicle or {}, "condition": condition}
 
     async def _async_fetch(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Fetch vehicle metadata and condition."""
         vehicles = await self.client.vehicles()
-        condition = await self.client.condition(self.vehicle_id)
+        vehicle = self._vehicle_from_list(vehicles) or {}
+        if self._vehicle_uses_mqtt(vehicle):
+            condition = await self.client.s05_mqtt_condition(self.vehicle_id)
+        else:
+            await self._async_maybe_active_condition_refresh()
+            condition = await self.client.condition(self.vehicle_id)
         return vehicles, condition
+
+    def _vehicle_from_list(self, vehicles: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Return the configured vehicle metadata from a vehicle list response."""
+        return next((item for item in vehicles if str(item.get("carId")) == self.vehicle_id), None)
+
+    @staticmethod
+    def _vehicle_uses_mqtt(vehicle: dict[str, Any]) -> bool:
+        """Return whether the app backend declares this vehicle as MQTT-backed."""
+        return str(vehicle.get("protocolType") or "").upper() == "MQTT"
+
+    @property
+    def vehicle_uses_mqtt(self) -> bool:
+        """Return whether the configured vehicle uses MQTT telemetry."""
+        vehicle = (self.data or {}).get("vehicle") or {}
+        return self._vehicle_uses_mqtt(vehicle)
 
     async def _async_maybe_active_condition_refresh(self) -> None:
         """Periodically ask the car/cloud for fresh condition data."""
