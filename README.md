@@ -22,7 +22,7 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 
 - Deepal S07: telemetry and optional remote controls.
 - Deepal S05: read-only telemetry.
-- Login regions: United Kingdom, Israel, Portugal
+- Login regions: United Kingdom, Israel, Portugal, Australia
 
 ## Current Features
 

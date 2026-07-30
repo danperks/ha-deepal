@@ -20,7 +20,13 @@ from cryptography.hazmat.primitives import hashes, padding as symmetric_padding,
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from .const import BASE_URL, CA_BASE_URL, REQUEST_ENCRYPTION_PUBLIC_KEY
+from .const import (
+    BASE_URL,
+    CA_BASE_URL,
+    DEFAULT_GATEWAY,
+    REGION_GATEWAYS,
+    REQUEST_ENCRYPTION_PUBLIC_KEY,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -406,6 +412,11 @@ class DeepalClient:
         self._session = session
         self.tokens = DeepalTokens(access_token, refresh_token)
         self.country = country
+        # Route requests to the cluster that homes this account. Non-default
+        # regions (e.g. AU -> Singapore) also use a different gateway prefix.
+        region = REGION_GATEWAYS.get((country or "").upper())
+        self.base_url = region["base_url"] if region else BASE_URL
+        self.gateway_prefix = region["gateway"] if region else DEFAULT_GATEWAY
         self.language = language
         self.app_version = app_version
         self.device_id = device_id
@@ -485,8 +496,14 @@ class DeepalClient:
         payload: dict[str, Any] | None = None,
         *,
         include_auth: bool = True,
-        base_url: str = BASE_URL,
+        base_url: str | None = None,
     ) -> Any:
+        if base_url is None:
+            base_url = self.base_url
+        # Endpoint paths embed the default European gateway prefix; rewrite the
+        # leading segment for regions that front the same services elsewhere.
+        if self.gateway_prefix != DEFAULT_GATEWAY and path.startswith(DEFAULT_GATEWAY + "/"):
+            path = self.gateway_prefix + path[len(DEFAULT_GATEWAY):]
         url = f"{base_url}{path}"
         headers = self._headers(include_auth=include_auth)
         started_at = time.monotonic()
