@@ -17,9 +17,10 @@ from .entity import DeepalEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DeepalDataUpdateCoordinator = entry.runtime_data
-    if coordinator.vehicle_uses_mqtt:
-        return
-    async_add_entities([DeepalChargeScheduleSwitch(coordinator)])
+    entities: list[SwitchEntity] = [DeepalSteeringWheelHeatSwitch(coordinator)]
+    if not coordinator.vehicle_uses_mqtt:
+        entities.append(DeepalChargeScheduleSwitch(coordinator))
+    async_add_entities(entities)
 
 
 def _charge_plan(condition: dict[str, Any]) -> dict[str, Any]:
@@ -72,3 +73,39 @@ class DeepalChargeScheduleSwitch(DeepalEntity, SwitchEntity):
             self.raise_command_reauth_required(err)
         except (DeepalApiError, DeepalCommandNotReady) as err:
             raise HomeAssistantError(f"Deepal charge schedule command failed: {err}") from err
+
+
+class DeepalSteeringWheelHeatSwitch(DeepalEntity, SwitchEntity):
+    """Turn the steering wheel heating on or off."""
+
+    _attr_translation_key = "steering_wheel_heating_control"
+    _attr_name = "Steering wheel heating"
+    _attr_icon = "mdi:steering"
+
+    def __init__(self, coordinator: DeepalDataUpdateCoordinator) -> None:
+        super().__init__(coordinator, "steering_wheel_heating_control")
+
+    @property
+    def is_on(self) -> bool | None:
+        value = (self.condition.get("vehicleStatus") or {}).get("steeringWheelHeater")
+        return bool(value) if value is not None else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._async_control(open_value=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._async_control(open_value=False)
+
+    async def _async_control(self, *, open_value: bool) -> None:
+        try:
+            await self.async_execute_command(
+                lambda: self.coordinator.client.control_steering_wheel_heat(
+                    vehicle_id=self.coordinator.vehicle_id,
+                    open_value=open_value,
+                ),
+                is_done=lambda: self.is_on is open_value,
+            )
+        except DeepalCommandAuthError as err:
+            self.raise_command_reauth_required(err)
+        except (DeepalApiError, DeepalCommandNotReady) as err:
+            raise HomeAssistantError(f"Deepal steering wheel heating command failed: {err}") from err

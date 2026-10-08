@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 from datetime import UTC, datetime
 import gzip
 import hashlib
@@ -29,6 +30,24 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# The S05 Door_Lock motor enum is lock=1, unlock=2, unlike the tailgate's
+# open=1/close=2 request enum.
+_S05_LOCK = 1
+_S05_UNLOCK = 2
+_S05_OPEN = 1
+_S05_CLOSE = 2
+_S05_POSITION_OPEN = 100
+_S05_POSITION_CLOSED = 0
+_S05_WAKE_SETTLE_SECONDS = 2
+_S05_COMMAND_TIMEOUT = 45
+_S05_SUCCESS_CODES = (None, "", 0, "0", "000000", 200, "200", "OK", "SUCCESS", "success")
+_S05_VEHICLE_ERROR_MESSAGES = {
+    "VVCC_-1_-1_02_023": "door status does not meet the command requirements",
+}
+
+_TRANSIENT_RETRY_ATTEMPTS = 3
+_TRANSIENT_RETRY_DELAY = 2
 
 _REDACTED = "[redacted]"
 _MAX_LOG_STRING_LENGTH = 500
@@ -222,6 +241,61 @@ def _s05_aes_encrypt(data: list[dict[str, Any]], secret_key: str, req_id: str) -
         modes.CBC(hashlib.md5(req_id.encode()).digest()),
     ).encryptor()
     return base64.b64encode(encryptor.update(padded) + encryptor.finalize()).decode()
+
+
+def _s05_payload_req_id(payload: dict[str, Any]) -> str | None:
+    """Return the request id from either S05 response envelope."""
+    req_id = payload.get("r")
+    if isinstance(req_id, str):
+        return req_id
+    for key in ("h", "header"):
+        header = payload.get(key)
+        if isinstance(header, dict) and isinstance(header.get("r"), str):
+            return header["r"]
+    return None
+
+
+def _s05_command_response_items(payload: dict[str, Any], secret_key: str, req_id: str) -> list[dict[str, Any]]:
+    """Decrypt the result items in an S05 command response."""
+    items: list[dict[str, Any]] = []
+    for field in ("rs", "sers"):
+        value = payload.get(field)
+        if isinstance(value, str) and value:
+            try:
+                items.extend(_s05_aes_decrypt(value, secret_key, req_id))
+            except (ValueError, binascii.Error, json.JSONDecodeError, gzip.BadGzipFile) as err:
+                raise DeepalApiError(f"Could not decrypt S05 command response: {err}") from err
+        elif isinstance(value, list):
+            items.extend(item for item in value if isinstance(item, dict))
+    return items
+
+
+def _s05_command_result_error(items: list[dict[str, Any]], payload: dict[str, Any]) -> str | None:
+    """Return an explicit vehicle error from a correlated S05 command response."""
+    candidates: list[dict[str, Any]] = [payload, *items]
+    index = 0
+    while index < len(candidates):
+        for key in ("h", "header", "d", "data", "p", "params"):
+            nested = candidates[index].get(key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+        index += 1
+
+    for item in candidates:
+        if item.get("success") is False:
+            return str(item.get("msg") or item.get("message") or "vehicle rejected the command")
+        if item.get("success") is True:
+            continue
+        for key in ("resultCode", "result_code", "code"):
+            code = item.get(key)
+            if code in _S05_SUCCESS_CODES:
+                continue
+            message = str(item.get("msg") or item.get("message") or "")
+            for error_code, detail in _S05_VEHICLE_ERROR_MESSAGES.items():
+                if error_code == str(code) or error_code in message:
+                    return f"{detail} ({error_code})"
+            return message or f"result code {code}"
+    return None
 
 
 def _as_int(value: Any) -> int | None:
@@ -424,6 +498,7 @@ class DeepalClient:
         self.control_pin = control_pin
         self.cac_token = cac_token
         self.user_id = user_id
+        self._ca_tsp_token: str | None = None
         self._private_key = self._load_private_key(private_key_pem) if private_key_pem else None
 
     @property
@@ -465,7 +540,7 @@ class DeepalClient:
         ciphertext = public_key.encrypt(value.encode(), padding.PKCS1v15())
         return base64.b64encode(ciphertext).decode()
 
-    def _headers(self, *, include_auth: bool = True, ca_gateway: bool = False) -> dict[str, str]:
+    def _headers(self, *, include_auth: bool = True, tsp_token: str | None = None) -> dict[str, str]:
         headers = {
             "authorization": "",
             "appid": "ca",
@@ -487,12 +562,10 @@ class DeepalClient:
                 else self.tokens.access_token
             )
             # CA/VOT endpoints such as getConnConf reject requests with
-            # "X-Tsp-User-Token is empty" unless the cacToken half of the
-            # composite authorization is also sent in these headers.
-            _, separator, user_token = headers["authorization"].partition("|")
-            if ca_gateway and separator and user_token:
-                headers["X-Tsp-User-Token"] = user_token
-                headers["X-VCS-User-Token"] = user_token
+            # "X-Tsp-User-Token is empty" unless a user token is also sent here.
+            user_token = tsp_token or self.tokens.access_token.partition("|")[0]
+            headers["X-Tsp-User-Token"] = user_token
+            headers["X-VCS-User-Token"] = user_token
         return headers
 
     async def _post(
@@ -502,54 +575,67 @@ class DeepalClient:
         *,
         include_auth: bool = True,
         base_url: str | None = None,
+        tsp_token: str | None = None,
+        retry: bool = True,
     ) -> Any:
+        """POST one request, retrying transient network failures when ``retry`` is set.
+
+        Physical vehicle commands must pass ``retry=False``: a request that timed
+        out may still have reached the car, and resending it repeats the action.
+        """
         if base_url is None:
             base_url = self.base_url
         if self.gateway_prefix != DEFAULT_GATEWAY and path.startswith(DEFAULT_GATEWAY + "/"):
             path = self.gateway_prefix + path[len(DEFAULT_GATEWAY):]
         url = f"{base_url}{path}"
-        headers = self._headers(include_auth=include_auth, ca_gateway=base_url == CA_BASE_URL)
+        headers = self._headers(include_auth=include_auth, tsp_token=tsp_token)
         started_at = time.monotonic()
-        try:
-            request_payload = payload or {}
-            if self.enable_api_logging:
-                _LOGGER.warning(
-                    "Deepal API debug request path=%s headers=%s payload=%s",
-                    path,
-                    _safe_log_headers(headers),
-                    _redact_for_log(request_payload),
-                )
-            request_body = json.dumps(request_payload, separators=(",", ":"), ensure_ascii=False)
-            async with self._session.post(
-                url,
-                data=request_body,
-                headers=headers,
-                timeout=30,
-            ) as resp:
-                status = resp.status
-                resp.raise_for_status()
-                body = await resp.json(content_type=None)
-        except ClientResponseError as err:
-            if self.enable_api_logging:
-                _LOGGER.warning(
-                    "Deepal API debug HTTP error path=%s status=%s elapsed=%.3fs error=%s",
-                    path,
-                    err.status,
-                    time.monotonic() - started_at,
-                    type(err).__name__,
-                )
-            if err.status in (401, 403):
-                raise DeepalAuthError(f"Deepal auth failed: HTTP {err.status}") from err
-            raise DeepalApiError(f"Deepal HTTP error {err.status} for {path}") from err
-        except (ClientError, TimeoutError) as err:
-            if self.enable_api_logging:
-                _LOGGER.warning(
-                    "Deepal API debug request error path=%s elapsed=%.3fs error=%s",
-                    path,
-                    time.monotonic() - started_at,
-                    type(err).__name__,
-                )
-            raise DeepalApiError(f"Deepal request failed for {path}: {err}") from err
+        request_payload = payload or {}
+        if self.enable_api_logging:
+            _LOGGER.warning(
+                "Deepal API debug request path=%s headers=%s payload=%s",
+                path,
+                _safe_log_headers(headers),
+                _redact_for_log(request_payload),
+            )
+        request_body = json.dumps(request_payload, separators=(",", ":"), ensure_ascii=False)
+        attempts = _TRANSIENT_RETRY_ATTEMPTS if retry else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                async with self._session.post(
+                    url,
+                    data=request_body,
+                    headers=headers,
+                    timeout=30,
+                ) as resp:
+                    status = resp.status
+                    resp.raise_for_status()
+                    body = await resp.json(content_type=None)
+                break
+            except ClientResponseError as err:
+                if self.enable_api_logging:
+                    _LOGGER.warning(
+                        "Deepal API debug HTTP error path=%s status=%s elapsed=%.3fs error=%s",
+                        path,
+                        err.status,
+                        time.monotonic() - started_at,
+                        type(err).__name__,
+                    )
+                if err.status in (401, 403):
+                    raise DeepalAuthError(f"Deepal auth failed: HTTP {err.status}") from err
+                raise DeepalApiError(f"Deepal HTTP error {err.status} for {path}") from err
+            except (ClientError, TimeoutError) as err:
+                if self.enable_api_logging:
+                    _LOGGER.warning(
+                        "Deepal API debug request error path=%s attempt=%s elapsed=%.3fs error=%s",
+                        path,
+                        attempt,
+                        time.monotonic() - started_at,
+                        type(err).__name__,
+                    )
+                if attempt >= attempts:
+                    raise DeepalApiError(f"Deepal request failed for {path}: {err}") from err
+                await asyncio.sleep(_TRANSIENT_RETRY_DELAY)
 
         if self.enable_api_logging:
             _LOGGER.warning(
@@ -582,8 +668,19 @@ class DeepalClient:
         return body.get("data")
 
     async def _post_ca(self, path: str, payload: dict[str, Any] | None = None) -> Any:
-        """POST to the CA gateway used by S05 MQTT setup endpoints."""
-        return await self._post(path, payload, base_url=CA_BASE_URL)
+        """POST to the CA gateway used by S05 MQTT setup endpoints.
+
+        Accounts differ in which token the gateway accepts as the TSP user token,
+        so fall back to the cacToken once and remember whichever works.
+        """
+        try:
+            return await self._post(path, payload, base_url=CA_BASE_URL, tsp_token=self._ca_tsp_token)
+        except DeepalApiError as err:
+            if self._ca_tsp_token or not self.cac_token or "APIGW_" not in str(err):
+                raise
+            data = await self._post(path, payload, base_url=CA_BASE_URL, tsp_token=self.cac_token)
+            self._ca_tsp_token = self.cac_token
+            return data
 
     async def refresh_tokens(self) -> DeepalTokens:
         """Refresh the bearer token using the captured app endpoint."""
@@ -598,6 +695,7 @@ class DeepalClient:
         self.tokens = DeepalTokens(str(data["token"]), data.get("refreshToken") or self.tokens.refresh_token)
         if data.get("cacToken"):
             self.cac_token = data.get("cacToken")
+        self._ca_tsp_token = None
         return self.tokens
 
     async def send_auth_code(self, *, country_code: str, mobile: str) -> None:
@@ -731,6 +829,194 @@ class DeepalClient:
             raise DeepalApiError("S05 MQTT auth response did not include authToken")
         return str(data["authToken"])
 
+    async def s05_control_doors(self, *, vehicle_id: str, open_value: bool) -> str:
+        """Lock or unlock an MQTT-backed vehicle."""
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="Door_Lock",
+            method="Cnr_RR_ObjDrv",
+            params={"MotCtrl": _S05_UNLOCK if open_value else _S05_LOCK},
+        )
+
+    async def s05_control_windows(self, *, vehicle_id: str, open_value: bool) -> str:
+        """Open or close all windows on an MQTT-backed vehicle."""
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="CarWin",
+            method="Cnr_WinAllCtrl",
+            params={"MotCtrlPos": _S05_POSITION_OPEN if open_value else _S05_POSITION_CLOSED},
+        )
+
+    async def s05_control_trunk(self, *, vehicle_id: str, open_value: bool) -> str:
+        """Open or close the boot on an MQTT-backed vehicle."""
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="TailGateDrv",
+            method="Cnr_TailGateDrv_ReqSt",
+            params={
+                "ReqTypeDoor": _S05_OPEN if open_value else _S05_CLOSE,
+                "TarPosnPerc": _S05_POSITION_OPEN if open_value else _S05_POSITION_CLOSED,
+            },
+        )
+
+    async def _s05_mqtt_command(
+        self,
+        vehicle_id: str,
+        *,
+        service_code: str,
+        method: str,
+        params: dict[str, Any],
+    ) -> str:
+        """Wake the S05, publish one command, and wait for its correlated response.
+
+        The physical command is published exactly once: a lost acknowledgement
+        must never cause a second physical action.
+        """
+        if not self.commands_available:
+            raise DeepalCommandNotReady("Remote commands require explicit enablement and a control PIN")
+        if self.control_pin:
+            await self.check_control_code(self.control_pin)
+
+        config = await self._s05_mqtt_config(vehicle_id)
+        token = await self._s05_mqtt_token()
+        info = ((config.get("mqttConnectionInfos") or [None])[0]) or {}
+        cluster = ((info.get("clusterInfos") or [None])[0]) or {}
+        host = str(cluster.get("brokerUrl", "")).replace("ssl://", "")
+        port = int(cluster.get("brokerPort") or 8883)
+        topics: list[str] = []
+        login_pub_topic: str | None = None
+        login_did: str | None = None
+        command_pub_topic: str | None = None
+        command_res_topic: str | None = None
+        device_did: str | None = None
+
+        for topic_info in info.get("topicInfos") or []:
+            msg_type = topic_info.get("msgType")
+            for topic in topic_info.get("pubTopics") or []:
+                if msg_type == "loginout" and "/loginout/req" in topic:
+                    login_pub_topic = topic
+                    login_did = self._s05_topic_did(topic)
+                elif msg_type == "commands" and "/commands/req" in topic:
+                    command_pub_topic = topic
+                    device_did = self._s05_topic_did(topic)
+            for topic in topic_info.get("subTopics") or []:
+                if msg_type in ("loginout", "commands"):
+                    topics.append(topic)
+                if msg_type == "commands" and "/commands/res" in topic:
+                    command_res_topic = topic
+                    if device_did is None:
+                        device_did = self._s05_topic_did(topic)
+
+        if not all((host, login_pub_topic, login_did, command_pub_topic, command_res_topic, device_did)):
+            raise DeepalApiError("S05 MQTT config did not include command topics")
+
+        context = await asyncio.to_thread(ssl.create_default_context)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port, ssl=context, server_hostname=host),
+            timeout=15,
+        )
+        try:
+            writer.write(_mqtt_connect_packet(login_did, login_did, token))
+            await writer.drain()
+            first, body = await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
+            rc = body[1] if first == 0x20 and len(body) >= 2 else None
+            if rc != 0:
+                raise DeepalApiError(f"S05 MQTT broker rejected connection: rc={rc}")
+
+            writer.write(_mqtt_subscribe_packet(1, sorted(set(topics))))
+            await writer.drain()
+            await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
+
+            writer.write(_mqtt_publish_packet(login_pub_topic, self._s05_login_payload(login_did)))
+            await writer.drain()
+
+            wake_req_id: str | None = None
+            command_req_id: str | None = None
+            secret_key: str | None = None
+            deadline = time.monotonic() + _S05_COMMAND_TIMEOUT
+            while time.monotonic() < deadline:
+                first, body = await asyncio.wait_for(
+                    _mqtt_read_packet(reader), timeout=max(1, deadline - time.monotonic())
+                )
+                if first >> 4 != 3:
+                    continue
+                topic, payload, packet_id = _mqtt_parse_publish(first, body)
+                if packet_id is not None:
+                    writer.write(bytes([0x40, 0x02]) + struct.pack("!H", packet_id))
+                    await writer.drain()
+
+                if secret_key is None:
+                    secret_key = self._s05_secret_from_payload(payload)
+                    if secret_key:
+                        wake_req_id = self._s05_req_id(device_did)
+                        writer.write(
+                            _mqtt_publish_packet(
+                                command_pub_topic,
+                                self._s05_command_request_payload(
+                                    device_did,
+                                    login_did,
+                                    secret_key,
+                                    wake_req_id,
+                                    service_code="TxWakeup",
+                                    method="Cnr_ReWakeup",
+                                    params={},
+                                ),
+                            )
+                        )
+                        await writer.drain()
+                    continue
+
+                if topic != command_res_topic:
+                    continue
+                response_req_id = _s05_payload_req_id(payload)
+                if response_req_id == wake_req_id and command_req_id is None:
+                    # An already-awake car may reject the redundant wake; either
+                    # response proves it was processed, so send the command once.
+                    await asyncio.sleep(_S05_WAKE_SETTLE_SECONDS)
+                    command_req_id = self._s05_req_id(device_did)
+                    writer.write(
+                        _mqtt_publish_packet(
+                            command_pub_topic,
+                            self._s05_command_request_payload(
+                                device_did,
+                                login_did,
+                                secret_key,
+                                command_req_id,
+                                service_code=service_code,
+                                method=method,
+                                params=params,
+                            ),
+                        )
+                    )
+                    await writer.drain()
+                    continue
+
+                if command_req_id is None or response_req_id != command_req_id:
+                    continue
+                items = _s05_command_response_items(payload, secret_key, command_req_id)
+                if self.enable_api_logging:
+                    _LOGGER.warning(
+                        "Deepal MQTT debug command service=%s method=%s params=%s response=%s",
+                        service_code,
+                        method,
+                        _redact_for_log(params),
+                        _redact_for_log(items),
+                    )
+                error = _s05_command_result_error(items, payload)
+                if error:
+                    raise DeepalApiError(f"S05 command failed: {error}")
+                return command_req_id
+
+            raise DeepalApiError("S05 MQTT command timed out without a correlated response")
+        except TimeoutError as err:
+            raise DeepalApiError("S05 MQTT command timed out without a correlated response") from err
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, TimeoutError, ssl.SSLError):
+                pass
+
     async def _s05_mqtt_read_condition(self, config: dict[str, Any], token: str) -> dict[str, Any]:
         info = ((config.get("mqttConnectionInfos") or [None])[0]) or {}
         cluster = ((info.get("clusterInfos") or [None])[0]) or {}
@@ -780,34 +1066,7 @@ class DeepalClient:
             await writer.drain()
             await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
 
-            login_req_id = self._s05_req_id(login_did)
-            writer.write(
-                _mqtt_publish_packet(
-                    login_pub_topic,
-                    {
-                        "did": login_did,
-                        "r": login_req_id,
-                        "v": "v1.0.0",
-                        "mt": "loginout",
-                        "z": "unzip",
-                        "a": 0,
-                        "e": 0,
-                        "tf": 0,
-                        "dt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-                        "pl": True,
-                        "sers": [
-                            {
-                                "service_code": "login",
-                                "params": {
-                                    "encryptEnable": 1,
-                                    "zipType": "gzip",
-                                    "ts": int(time.time() * 1000),
-                                },
-                            }
-                        ],
-                    },
-                )
-            )
+            writer.write(_mqtt_publish_packet(login_pub_topic, self._s05_login_payload(login_did)))
             await writer.drain()
 
             secret_key: str | None = None
@@ -863,6 +1122,58 @@ class DeepalClient:
     @staticmethod
     def _s05_req_id(device_id: str) -> str:
         return f"{device_id}_{int(time.time() * 1000000)}"
+
+    @classmethod
+    def _s05_login_payload(cls, login_did: str) -> dict[str, Any]:
+        return {
+            "did": login_did,
+            "r": cls._s05_req_id(login_did),
+            "v": "v1.0.0",
+            "mt": "loginout",
+            "z": "unzip",
+            "a": 0,
+            "e": 0,
+            "tf": 0,
+            "dt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "pl": True,
+            "sers": [
+                {
+                    "service_code": "login",
+                    "params": {
+                        "encryptEnable": 1,
+                        "zipType": "gzip",
+                        "ts": int(time.time() * 1000),
+                    },
+                }
+            ],
+        }
+
+    @staticmethod
+    def _s05_command_request_payload(
+        device_did: str,
+        login_did: str,
+        secret_key: str,
+        req_id: str,
+        *,
+        service_code: str,
+        method: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build the encrypted VDP command envelope used by MQTT vehicles."""
+        sers = [{"service_code": service_code, "command_code": method, "params": params}]
+        return {
+            "did": device_did,
+            "r": req_id,
+            "v": "v1.0.0",
+            "mt": "commands",
+            "e": 1,
+            "z": "gzip",
+            "tf": 0,
+            "dt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "b": {"ruid": login_did},
+            "sers": _s05_aes_encrypt(sers, secret_key, req_id),
+            "rt": "",
+        }
 
     @staticmethod
     def _s05_secret_from_payload(payload: dict[str, Any]) -> str | None:
@@ -952,8 +1263,19 @@ class DeepalClient:
             raise DeepalApiError("Unexpected serial-no response")
         return data
 
+    async def get_security_code_status(self) -> dict[str, Any]:
+        """Return the control-PIN status; the app always calls this before check-code."""
+        data = await self._post("/intl-app-gw/intl-app-car-control/api/security-code/get-status")
+        return data if isinstance(data, dict) else {}
+
     async def check_control_code(self, safe_code: str) -> str:
         """Exchange the remote-control PIN for an rcToken."""
+        status = await self.get_security_code_status()
+        remaining = _as_int(status.get("retryQuantity"))
+        if remaining is not None and remaining <= 0:
+            raise DeepalRateLimitError(
+                "No control PIN attempts left; wait for the lockout to expire or reset the PIN in the Deepal app"
+            )
         data = await self._post(
             "/intl-app-gw/intl-app-car-control/api/security-code/check-code",
             {"safeCode": self.encrypt_request_value(safe_code)},
@@ -976,10 +1298,14 @@ class DeepalClient:
         """Send one app-style signed command and return its command id."""
         if not self.commands_enabled:
             raise DeepalCommandNotReady("Remote commands are not enabled or command signing is incomplete")
-        if require_rc_token and not self.rc_token:
-            if not self.control_pin:
+        reused_rc_token = False
+        if require_rc_token:
+            if self.rc_token:
+                reused_rc_token = True
+            elif self.control_pin:
+                await self.check_control_code(self.control_pin)
+            else:
                 raise DeepalCommandNotReady("Control PIN or rcToken is required")
-            await self.check_control_code(self.control_pin)
         serial_data = await self.get_serial_data(serial_type)
         seriral_no = self.decrypt_seriral_no(serial_data)
         signed_payload = {
@@ -989,12 +1315,25 @@ class DeepalClient:
             "vehicleId": vehicle_id,
         }
         signed_payload["sign"] = self.sign_payload(signed_payload, omit_keys=sign_omit_keys)
-        data = await self._post(path, signed_payload)
+        try:
+            data = await self._post(path, signed_payload, retry=False)
+        except DeepalRateLimitError:
+            raise
+        except DeepalApiError:
+            # A cached rcToken expires (the app asks for the PIN again roughly
+            # weekly), and the server only reveals that by rejecting the command.
+            if not (reused_rc_token and self.control_pin):
+                raise
+            self.rc_token = None
+            await self.check_control_code(self.control_pin)
+            signed_payload["rcToken"] = self.rc_token or ""
+            signed_payload["sign"] = self.sign_payload(signed_payload, omit_keys=sign_omit_keys)
+            data = await self._post(path, signed_payload, retry=False)
         if not isinstance(data, dict) or not data.get("commandId"):
             raise DeepalApiError("Control command did not return commandId")
         return str(data["commandId"])
 
-    async def control_doors(self, *, vehicle_id: str, command: str, open_value: bool) -> str:
+    async def control_doors(self, *, vehicle_id: str, open_value: bool) -> str:
         """Send a lock/unlock command; never available unless explicitly enabled."""
         return await self._signed_command(
             path="/intl-app-gw/intl-app-car-control/api/control/doors",
@@ -1034,6 +1373,7 @@ class DeepalClient:
             vehicle_id=vehicle_id,
             payload={"chargePercentageMax": int(percentage), "command": "charge_max"},
             serial_type="2",
+            sign_omit_keys={"command", "rcToken"},
         )
 
     async def control_charge_schedule(
@@ -1064,6 +1404,7 @@ class DeepalClient:
                 "timeZone": time_zone,
             },
             serial_type="2",
+            sign_omit_keys={"command", "rcToken"},
         )
 
     async def control_windows(self, *, vehicle_id: str, open_value: bool, open_type: int = 10) -> str:
@@ -1095,6 +1436,44 @@ class DeepalClient:
             path="/intl-app-gw/intl-app-car-control/api/control/flashing-honking",
             vehicle_id=vehicle_id,
             payload={"command": "flash_bee", "type": action_type},
+            sign_omit_keys={"command", "rcToken"},
+        )
+
+    async def control_seats_heat(self, *, vehicle_id: str, driver: bool, level: int) -> str:
+        """Set the driver or front-passenger seat heating level (0 turns it off)."""
+        return await self._signed_command(
+            path="/intl-app-gw/intl-app-car-control/api/control/seats/heat",
+            vehicle_id=vehicle_id,
+            payload=self._seat_payload("seats_heat", driver=driver, level=level),
+            sign_omit_keys={"command", "rcToken"},
+        )
+
+    async def control_seats_wind(self, *, vehicle_id: str, driver: bool, level: int) -> str:
+        """Set the driver or front-passenger seat ventilation level (0 turns it off)."""
+        return await self._signed_command(
+            path="/intl-app-gw/intl-app-car-control/api/control/seats/wind",
+            vehicle_id=vehicle_id,
+            payload=self._seat_payload("seats_wind", driver=driver, level=level),
+            sign_omit_keys={"command", "rcToken"},
+        )
+
+    @staticmethod
+    def _seat_payload(command: str, *, driver: bool, level: int) -> dict[str, Any]:
+        # The endpoint rejects explicit nulls and a zero level, so only the
+        # requested seat is sent and "off" is a zero switch without a level.
+        prefix = "master" if driver else "copilot"
+        payload: dict[str, Any] = {"command": command, f"{prefix}Switch": 1 if level > 0 else 0}
+        if level > 0:
+            payload[f"{prefix}Level"] = level
+        return payload
+
+    async def control_steering_wheel_heat(self, *, vehicle_id: str, open_value: bool) -> str:
+        """Turn the steering wheel heating on or off."""
+        return await self._signed_command(
+            path="/intl-app-gw/intl-app-car-control/api/control/steering-wheel/heat",
+            vehicle_id=vehicle_id,
+            payload={"command": "steering_wheel_heating", "open": open_value},
+            sign_omit_keys={"command", "rcToken"},
         )
 
     async def control_condition_inquiry(self, *, vehicle_id: str) -> str:

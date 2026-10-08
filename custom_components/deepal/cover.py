@@ -17,8 +17,6 @@ from .entity import DeepalEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DeepalDataUpdateCoordinator = entry.runtime_data
-    if coordinator.vehicle_uses_mqtt:
-        return
     async_add_entities([DeepalWindowsCover(coordinator), DeepalBootCover(coordinator)])
 
 
@@ -54,12 +52,11 @@ class DeepalWindowsCover(_DeepalOpenCloseCover):
         return all(value == 0 for value in windows)
 
     async def _async_control(self, *, open_value: bool) -> None:
+        client = self.coordinator.client
+        control = client.s05_control_windows if self.coordinator.vehicle_uses_mqtt else client.control_windows
         try:
             await self.async_execute_command(
-                lambda: self.coordinator.client.control_windows(
-                    vehicle_id=self.coordinator.vehicle_id,
-                    open_value=open_value,
-                ),
+                lambda: control(vehicle_id=self.coordinator.vehicle_id, open_value=open_value),
                 is_done=lambda: self.is_closed is (not open_value),
             )
         except DeepalCommandAuthError as err:
@@ -86,12 +83,11 @@ class DeepalBootCover(_DeepalOpenCloseCover):
         return (trunk == 0) if trunk is not None else None
 
     async def _async_control(self, *, open_value: bool) -> None:
+        client = self.coordinator.client
+        control = client.s05_control_trunk if self.coordinator.vehicle_uses_mqtt else client.control_trunk
         try:
             await self.async_execute_command(
-                lambda: self.coordinator.client.control_trunk(
-                    vehicle_id=self.coordinator.vehicle_id,
-                    open_value=open_value,
-                ),
+                lambda: control(vehicle_id=self.coordinator.vehicle_id, open_value=open_value),
                 is_done=lambda: self.is_closed is (not open_value),
             )
         except DeepalCommandAuthError as err:

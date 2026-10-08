@@ -134,6 +134,10 @@ class DeepalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             previous_last_updated = self._condition_last_updated()
             command_id = await send_command()
+            if self.vehicle_uses_mqtt:
+                # MQTT vehicles have no REST condition to poll; read fresh telemetry once.
+                await self.async_request_refresh()
+                return
             await self.async_poll_command_update(
                 command_id,
                 previous_last_updated=previous_last_updated,

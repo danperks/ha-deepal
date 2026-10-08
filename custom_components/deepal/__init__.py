@@ -9,7 +9,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import DeepalClient
 from .const import (
     CONF_ACCESS_TOKEN,
-    CONF_APP_VERSION,
     CONF_CAC_TOKEN,
     CONF_CAC_USER_ID,
     CONF_CA_USER_ID,
@@ -43,7 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         refresh_token=data.get(CONF_REFRESH_TOKEN),
         country=data.get(CONF_COUNTRY, DEFAULT_COUNTRY),
         language=data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
-        app_version=data.get(CONF_APP_VERSION, DEFAULT_APP_VERSION),
+        app_version=DEFAULT_APP_VERSION,
         device_id=data[CONF_DEVICE_ID],
         private_key_pem=data.get(CONF_PRIVATE_KEY),
         enable_commands=data.get(CONF_ENABLE_COMMANDS, False),

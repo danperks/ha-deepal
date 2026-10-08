@@ -8,7 +8,7 @@
 
 Custom Home Assistant integration for the Changan Deepal cloud API.
 
-This integration was built against a UK-market Deepal S07 and a Portugal-market Deepal S05. S07 support includes telemetry and remote controls when enabled. S05 support is currently **read-only** via the app's MQTT telemetry path.
+This integration was built against a UK-market Deepal S07 and a Portugal-market Deepal S05. Both support telemetry and, when enabled, remote controls. S05 telemetry and door, window, and boot controls use the app's MQTT path.
 
 ## Important Warnings
 
@@ -21,23 +21,24 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 ## Supported Vehicle
 
 - Deepal S07: telemetry and optional remote controls.
-- Deepal S05: read-only telemetry.
+- Deepal S05: telemetry and optional remote controls (no charge limit or charging schedule).
 - Login regions: United Kingdom, Israel, Portugal, Spain, Italy, Netherlands, Australia
 
 ## Current Features
 
 - Email-code and phone/SMS login flows through Home Assistant.
-- Native Home Assistant reauthentication/repair flow when the cloud session is invalidated.
+- Native Home Assistant reauthentication/repair flow when the cloud session is invalidated, plus a "Reauthenticate now" option.
 - Vehicle telemetry sensors and binary sensors.
 - Vehicle image URL sensor from the Deepal vehicle metadata.
 - Manual refresh button.
-- Cabin climate entity. S05 is state-only in this version.
+- Cabin climate control.
+- Door lock, window, and boot controls. On the S05 these wake the car first and wait for its response.
+- Flash lights and horn buttons.
+- Driver and front passenger seat heating and ventilation levels.
+- Steering wheel heating switch.
 - S07 charge limit and charging schedule controls.
-- S07 door lock control.
-- S07 window and boot cover controls.
-- S07 flash lights and horn buttons.
 
-S05 controls are still being reverse engineered and are intentionally not exposed in this read-only release.
+S05 controls are new and have only been tested on a few cars, so please report anything that doesn't work.
 
 ## Installation
 
@@ -61,14 +62,23 @@ S05 controls are still being reverse engineered and are intentionally not expose
 
 You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Changan Deepal Cloud**.
 
-During setup, choose the same login method you use in the official Deepal app. If phone/SMS login says the account is not registered, try email-code login instead. S07 users can choose whether to enable remote commands; remote commands require the same control PIN used by the official Deepal app. S05 entries are created read-only.
+During setup, choose the same login method you use in the official Deepal app. If phone/SMS login says the account is not registered, try email-code login instead. You can choose whether to enable remote commands; remote commands require the same control PIN used by the official Deepal app. Existing S05 entries can enable them from the integration's **Configure** dialog.
 
 ## Notes
 
-- The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry without exposing vehicle controls.
+- The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry, and re-reads it after each command.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
 
 ## Development Status
 
 This is early reverse-engineering work. Expect breaking changes, incomplete model support, and occasional cloud API/session issues.
+
+## Thanks
+
+This integration is much better thanks to work from the community:
+
+- [@kobizz](https://github.com/kobizz) for the S05 gateway token fix and the S05 door, window, and boot controls.
+- [@BeauGiles](https://github.com/BeauGiles) for remote command signing and control PIN fixes, transient request retries, the reauthenticate option, and repair flow.
+- [@DylanTusler](https://github.com/DylanTusler) for Australian login support via the Singapore gateway.
+- The [ha-deepal-alternative](https://github.com/Sunek0/ha-deepal-alternative) contributors, whose research informed the S05 gateway token handling, S05 climate and light controls, and the seat and steering wheel controls.

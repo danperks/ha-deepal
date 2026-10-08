@@ -73,22 +73,35 @@
           "active_refresh_interval": "Vehicle refresh interval",
           "control_pin": "Control PIN",
           "enable_commands": "Enable remote commands",
-          "enable_api_logging": "Enable redacted API logging"
+          "enable_api_logging": "Enable redacted API logging",
+          "reauthenticate": "Reauthenticate now"
         },
         "data_description": {
           "scan_interval": "How often Home Assistant polls the cached cloud status. This is lightweight and does not wake or actively query the car.",
           "active_refresh_interval": "How often Home Assistant sends the signed refresh command that asks the cloud/car for newer vehicle data. Only used when remote commands are enabled.",
           "control_pin": "The same PIN used for remote controls in the official Deepal app. Required when remote commands are enabled.",
-          "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, lights, and horn.",
-          "enable_api_logging": "Write redacted Deepal API requests and responses to the Home Assistant log for troubleshooting. Tokens, PINs, signatures, keys, and account identifiers are filtered, but vehicle data may still appear. Leave disabled unless debugging."
+          "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, seat and steering wheel heating, lights, and horn.",
+          "enable_api_logging": "Write redacted Deepal API requests and responses to the Home Assistant log for troubleshooting. Tokens, PINs, signatures, keys, and account identifiers are filtered, but vehicle data may still appear. Leave disabled unless debugging.",
+          "reauthenticate": "Log in again to register a fresh command-signing key without removing the integration. Use this if remote commands fail while vehicle data still updates. Other changes in the same submission are ignored."
         }
       }
+    },
+    "abort": {
+      "reauth_triggered": "Reauthentication started. Follow the Home Assistant notification to finish logging in again."
     }
   },
   "issues": {
     "command_reauth": {
       "title": "Deepal remote commands need reauthentication",
-      "description": "Deepal accepted the account session and control PIN, but rejected the remote-command signing key. Reauthenticate the Deepal integration so Home Assistant can register a fresh command key."
+      "description": "Deepal accepted the account session and control PIN, but rejected the remote-command signing key. Reauthenticate the Deepal integration so Home Assistant can register a fresh command key.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Deepal remote commands need reauthentication",
+            "description": "This logs in again to register a fresh command-signing key. Home Assistant will show a notification to finish logging in once you confirm."
+          }
+        }
+      }
     }
   },
   "entity": {
@@ -174,10 +187,15 @@
       "cabin_climate": {"name": "Cabin climate"}
     },
     "number": {
-      "charge_limit_control": {"name": "Charge limit"}
+      "charge_limit_control": {"name": "Charge limit"},
+      "driver_seat_heating_control": {"name": "Driver seat heating"},
+      "front_passenger_seat_heating_control": {"name": "Front passenger seat heating"},
+      "driver_seat_ventilation_control": {"name": "Driver seat ventilation"},
+      "front_passenger_seat_ventilation_control": {"name": "Front passenger seat ventilation"}
     },
     "switch": {
-      "charge_schedule_control": {"name": "Charge schedule"}
+      "charge_schedule_control": {"name": "Charge schedule"},
+      "steering_wheel_heating_control": {"name": "Steering wheel heating"}
     },
     "time": {
       "charge_schedule_start_time": {"name": "Charge schedule start"},
