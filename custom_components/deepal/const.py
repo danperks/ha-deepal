@@ -46,6 +46,14 @@ DEFAULT_ACTIVE_REFRESH_INTERVAL = 300
 BASE_URL = "https://m.iov.changanauto.com.de"
 CA_BASE_URL = "https://ca-m.iov.changanauto.com.de"
 
+DEFAULT_GATEWAY = "/intl-app-gw"
+
+# APAC accounts are homed on the Singapore cluster behind "/appgw"; logging in
+# against the European cluster returns CAC_1_1_01_024 "Account not registered".
+REGION_GATEWAYS = {
+    "AU": {"base_url": "https://m.iov.changanauto.sg", "gateway": "/appgw"},
+}
+
 # 2048-bit RSA public key used by the app to encrypt mobile/password/control PIN fields.
 # Extracted from the live app's Dalvik heap and validated against send-auth-code:
 # RSA/ECB/PKCS1Padding succeeds; OAEP variants fail.

@@ -20,7 +20,13 @@ from cryptography.hazmat.primitives import hashes, padding as symmetric_padding,
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from .const import BASE_URL, CA_BASE_URL, REQUEST_ENCRYPTION_PUBLIC_KEY
+from .const import (
+    BASE_URL,
+    CA_BASE_URL,
+    DEFAULT_GATEWAY,
+    REGION_GATEWAYS,
+    REQUEST_ENCRYPTION_PUBLIC_KEY,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -406,6 +412,9 @@ class DeepalClient:
         self._session = session
         self.tokens = DeepalTokens(access_token, refresh_token)
         self.country = country
+        region = REGION_GATEWAYS.get((country or "").upper())
+        self.base_url = region["base_url"] if region else BASE_URL
+        self.gateway_prefix = region["gateway"] if region else DEFAULT_GATEWAY
         self.language = language
         self.app_version = app_version
         self.device_id = device_id
@@ -456,7 +465,7 @@ class DeepalClient:
         ciphertext = public_key.encrypt(value.encode(), padding.PKCS1v15())
         return base64.b64encode(ciphertext).decode()
 
-    def _headers(self, *, include_auth: bool = True) -> dict[str, str]:
+    def _headers(self, *, include_auth: bool = True, ca_gateway: bool = False) -> dict[str, str]:
         headers = {
             "authorization": "",
             "appid": "ca",
@@ -477,6 +486,13 @@ class DeepalClient:
                 if self.cac_token and "|" not in self.tokens.access_token
                 else self.tokens.access_token
             )
+            # CA/VOT endpoints such as getConnConf reject requests with
+            # "X-Tsp-User-Token is empty" unless the cacToken half of the
+            # composite authorization is also sent in these headers.
+            _, separator, user_token = headers["authorization"].partition("|")
+            if ca_gateway and separator and user_token:
+                headers["X-Tsp-User-Token"] = user_token
+                headers["X-VCS-User-Token"] = user_token
         return headers
 
     async def _post(
@@ -485,10 +501,14 @@ class DeepalClient:
         payload: dict[str, Any] | None = None,
         *,
         include_auth: bool = True,
-        base_url: str = BASE_URL,
+        base_url: str | None = None,
     ) -> Any:
+        if base_url is None:
+            base_url = self.base_url
+        if self.gateway_prefix != DEFAULT_GATEWAY and path.startswith(DEFAULT_GATEWAY + "/"):
+            path = self.gateway_prefix + path[len(DEFAULT_GATEWAY):]
         url = f"{base_url}{path}"
-        headers = self._headers(include_auth=include_auth)
+        headers = self._headers(include_auth=include_auth, ca_gateway=base_url == CA_BASE_URL)
         started_at = time.monotonic()
         try:
             request_payload = payload or {}
@@ -740,7 +760,8 @@ class DeepalClient:
         if not host or not login_pub_topic or not login_did or not properties_get_topic or not device_did:
             raise DeepalApiError("S05 MQTT config did not include required topics")
 
-        context = ssl.create_default_context()
+        # Loading the system trust store is blocking I/O; keep it off the event loop.
+        context = await asyncio.to_thread(ssl.create_default_context)
         reader: asyncio.StreamReader
         writer: asyncio.StreamWriter
         reader, writer = await asyncio.wait_for(

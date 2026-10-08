@@ -49,12 +49,20 @@ COUNTRY_OPTIONS = {
     "GB": "United Kingdom (+44)",
     "IL": "Israel (+972)",
     "PT": "Portugal (+351)",
+    "ES": "Spain (+34)",
+    "IT": "Italy (+39)",
+    "NL": "Netherlands (+31)",
+    "AU": "Australia (+61)",
 }
 
 COUNTRY_DIAL_CODES = {
     "GB": "44",
     "IL": "972",
     "PT": "351",
+    "ES": "34",
+    "IT": "39",
+    "NL": "31",
+    "AU": "61",
 }
 
 LOGIN_METHOD_EMAIL = "email"
@@ -427,7 +435,7 @@ class DeepalOptionsFlow(config_entries.OptionsFlow):
     """Options flow for Deepal."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -437,7 +445,7 @@ class DeepalOptionsFlow(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title="", data=user_input)
 
-        data = self.config_entry.data | self.config_entry.options
+        data = self._config_entry.data | self._config_entry.options
         schema = vol.Schema(
             {
                 vol.Optional(CONF_SCAN_INTERVAL, default=data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): selector.NumberSelector(
