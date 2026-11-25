@@ -348,16 +348,17 @@ class ResilienceCoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_or_unhealthy_live_session_keeps_rest_backoff(self) -> None:
         """Backoff still skips one-shot MQTT when the live session has no snapshot."""
         loop = asyncio.get_running_loop()
-        for snapshot in (
+        cases = (
             _LiveSnapshot({}, healthy=True),
             _LiveSnapshot(None, healthy=True),
             _LiveSnapshot({"src": "live"}, healthy=False),
             None,
-        ):
+        )
+        for index, snapshot in enumerate(cases):
             with self.subTest(snapshot=snapshot.condition if snapshot else None, healthy=getattr(snapshot, "healthy", None)):
                 client = _MqttClient()
                 client.live_mqtt = snapshot
-                coordinator = self._coordinator(client)
+                coordinator = self._coordinator(client, entry_id=f"live-backoff-{index}")
                 coordinator._mqtt_failures = 1
                 retry_after = loop.time() + 10_000
                 coordinator._mqtt_retry_after = retry_after
