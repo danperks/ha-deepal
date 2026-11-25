@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import _as_int
+from .api import _as_float, _as_int
 from .coordinator import DeepalDataUpdateCoordinator
 from .entity import DeepalEntity
 
@@ -38,15 +38,59 @@ def _charge(data: dict[str, Any]) -> dict[str, Any]:
     return data.get("charge") or {}
 
 
-def _charge_cable_connected(data: dict[str, Any]) -> bool | None:
+def _is_charging(data: dict[str, Any]) -> bool | None:
+    """Return whether the car is actively charging.
+
+    S05 MQTT (``rawS05`` present) already normalizes ``chargeStatus`` so any
+    non-zero value is charging. S07 REST uses 0 for idle, 1 for standby, and
+    6 for charging. A finite ``remainChargeTime`` strictly between 0 and 8000
+    is also a live S07 charge.
+    """
     charge = _charge(data)
-    charge_status = charge.get("chargeStatus")
-    charge_connection = charge.get("chargeConStatus")
-    if charge_status not in (None, 0):
+    status = charge.get("chargeStatus")
+    if "rawS05" in data:
+        return (status != 0) if status is not None else None
+    if status == 6:
         return True
+    remain = _as_float(charge.get("remainChargeTime"))
+    if remain is not None and 0 < remain < 8000:
+        return True
+    if (
+        status is None
+        and remain is None
+        and charge.get("acChargeCurrent") is None
+        and charge.get("dcChargeCurrent") is None
+    ):
+        return None
+    return False
+
+
+def _charge_cable_connected(data: dict[str, Any]) -> bool | None:
+    """Return whether a charge cable is plugged in.
+
+    Active charging implies a cable. S07 standby (``chargeStatus`` 1) does not,
+    so an unplugged car is not reported as connected.
+    """
+    if _is_charging(data) is True:
+        return True
+    charge_connection = _charge(data).get("chargeConStatus")
     if charge_connection is None:
         return None
     return charge_connection not in (0, 1)
+
+
+def _dc_charge_gun_connected(data: dict[str, Any]) -> bool | None:
+    """Return whether the DC gun is connected.
+
+    S05 MQTT uses 0 for connected. On S07 REST the field stays at 1 whether or
+    not a cable is plugged, so only an explicit 0 is connected.
+    """
+    status = _charge(data).get("dcChargeGunConnectStatus")
+    if "rawS05" in data:
+        return (status == 0) if status is not None else None
+    if status == 0:
+        return True
+    return None
 
 
 def _tire_warning(data: dict[str, Any], wheel: str) -> bool | None:
@@ -197,13 +241,13 @@ BINARY_SENSORS: tuple[DeepalBinarySensorDescription, ...] = (
         key="dc_charge_gun_connected",
         translation_key="dc_charge_gun_connected",
         device_class=BinarySensorDeviceClass.PLUG,
-        value_fn=lambda data: (_charge(data).get("dcChargeGunConnectStatus") == 0) if _charge(data).get("dcChargeGunConnectStatus") is not None else None,
+        value_fn=_dc_charge_gun_connected,
     ),
     DeepalBinarySensorDescription(
         key="charging",
         translation_key="charging",
         device_class=BinarySensorDeviceClass.BATTERY_CHARGING,
-        value_fn=lambda data: (_charge(data).get("chargeStatus") != 0) if _charge(data).get("chargeStatus") is not None else None,
+        value_fn=_is_charging,
     ),
     DeepalBinarySensorDescription(
         key="charge_schedule_enabled",

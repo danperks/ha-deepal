@@ -1953,22 +1953,33 @@ class DeepalClient:
         plan_id: str,
         start_time: str,
         end_time: str,
-        enabled: bool,
+        enabled: bool | None = None,
+        start_enabled: bool | None = None,
+        end_enabled: bool | None = None,
         plan_type: int = 1,
         time_format: int = 1,
         time_zone: str = "GMT+08:00",
     ) -> str:
-        """Update the captured charging schedule plan."""
-        switch = 1 if enabled else 0
+        """Update the captured charging schedule plan.
+
+        ``enabled`` still sets both switches, which is what the schedule switch
+        and time entities pass. ``start_enabled`` and ``end_enabled`` override
+        that default when a caller needs them independently.
+        """
+        if start_enabled is None:
+            start_enabled = bool(enabled)
+        if end_enabled is None:
+            end_enabled = bool(enabled)
         return await self._signed_command(
             path="/intl-app-gw/intl-app-car-control/api/charge/modify-plan",
             vehicle_id=vehicle_id,
             payload={
                 "command": "modify-plan",
-                "endSwitch": switch,
+                "endSwitch": 1 if end_enabled else 0,
                 "endTime": end_time,
                 "planId": str(plan_id),
                 "planType": plan_type,
+                "startSwitch": 1 if start_enabled else 0,
                 "startTime": start_time,
                 "timeFormat": time_format,
                 "timeZone": time_zone,

@@ -22,3 +22,29 @@ authorize_qr:
       selector:
         config_entry:
           integration: deepal
+
+set_charge_window:
+  name: Set charge window
+  description: >-
+    Set the S07 charging schedule start and end times in one command. The
+    current start and end switches are left as they are. Target the charge
+    schedule switch.
+  target:
+    entity:
+      domain: switch
+      integration: deepal
+  fields:
+    start_time:
+      name: Start time
+      description: Time of day the charge window starts.
+      required: true
+      example: "00:30:00"
+      selector:
+        time:
+    end_time:
+      name: End time
+      description: Time of day the charge window ends.
+      required: true
+      example: "07:00:00"
+      selector:
+        time:

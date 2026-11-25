@@ -106,6 +106,9 @@ class DeepalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Repair an existing entry whose app session has been invalidated."""
         entry_id = self.context.get("entry_id")
         self._reauth_entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        for name in ("_email_login", "_phone_login", "_login_result"):
+            if hasattr(self, name):
+                delattr(self, name)
         return await self.async_step_user()
 
     async def async_step_phone(self, user_input: dict[str, Any] | None = None):
@@ -217,87 +220,117 @@ class DeepalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_email_code(self, user_input: dict[str, Any] | None = None):
         """Complete email login with the verification code."""
+        if not hasattr(self, "_email_login"):
+            return await self.async_step_email()
+
         errors: dict[str, str] = {}
         if user_input is not None:
-            info = self._email_login
-            client = DeepalClient(
-                async_get_clientsession(self.hass),
-                access_token="",
-                refresh_token=None,
-                country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
-                language=info.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
-                app_version=info.get(CONF_APP_VERSION, DEFAULT_APP_VERSION),
-                device_id=info[CONF_DEVICE_ID],
-                private_key_pem=info[CONF_PRIVATE_KEY],
-            )
-            try:
-                login = await client.login_by_email_code(
-                    email=info[CONF_EMAIL],
-                    auth_code=user_input["auth_code"],
-                    sales_country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
-                    pub_key=info["pub_key"],
-                )
-                vehicles = await client.vehicles()
-            except DeepalRateLimitError:
-                errors["base"] = "too_many_codes"
-            except DeepalApiError as err:
-                if "APP_1_1_07_002" in str(err):
-                    errors["base"] = "bad_email_code"
-                else:
-                    errors["base"] = "login_failed"
+            if user_input.get("start_over"):
+                del self._email_login
+                return await self.async_step_email()
+            auth_code = str(user_input.get("auth_code") or "").strip()
+            if not auth_code:
+                errors["base"] = "bad_email_code"
             else:
-                if not vehicles:
-                    errors["base"] = "no_vehicles"
+                info = self._email_login
+                client = DeepalClient(
+                    async_get_clientsession(self.hass),
+                    access_token="",
+                    refresh_token=None,
+                    country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
+                    language=info.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
+                    app_version=info.get(CONF_APP_VERSION, DEFAULT_APP_VERSION),
+                    device_id=info[CONF_DEVICE_ID],
+                    private_key_pem=info[CONF_PRIVATE_KEY],
+                )
+                try:
+                    login = await client.login_by_email_code(
+                        email=info[CONF_EMAIL],
+                        auth_code=auth_code,
+                        sales_country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
+                        pub_key=info["pub_key"],
+                    )
+                    vehicles = await client.vehicles()
+                except DeepalRateLimitError:
+                    errors["base"] = "too_many_codes"
+                except DeepalApiError as err:
+                    if "APP_1_1_07_002" in str(err):
+                        errors["base"] = "bad_email_code"
+                    else:
+                        errors["base"] = "login_failed"
                 else:
-                    if self._reauth_entry is not None:
-                        return await self._async_finish_reauth(login, vehicles, info, code_step="email_code")
-                    self._login_result = {"login": login, "vehicles": vehicles, "info": info}
-                    return await self.async_step_commands()
+                    if not vehicles:
+                        errors["base"] = "no_vehicles"
+                    else:
+                        if self._reauth_entry is not None:
+                            return await self._async_finish_reauth(login, vehicles, info, code_step="email_code")
+                        self._login_result = {"login": login, "vehicles": vehicles, "info": info}
+                        return await self.async_step_commands()
 
-        schema = vol.Schema({vol.Required("auth_code"): str})
+        schema = vol.Schema(
+            {
+                vol.Optional("auth_code", default=""): str,
+                vol.Optional("start_over", default=False): bool,
+            }
+        )
         return self.async_show_form(step_id="email_code", data_schema=schema, errors=errors)
 
     async def async_step_sms(self, user_input: dict[str, Any] | None = None):
         """Complete phone login with the SMS code."""
+        if not hasattr(self, "_phone_login"):
+            return await self.async_step_phone()
+
         errors: dict[str, str] = {}
         if user_input is not None:
-            info = self._phone_login
-            client = DeepalClient(
-                async_get_clientsession(self.hass),
-                access_token="",
-                refresh_token=None,
-                country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
-                language=info.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
-                app_version=info.get(CONF_APP_VERSION, DEFAULT_APP_VERSION),
-                device_id=info[CONF_DEVICE_ID],
-                private_key_pem=info[CONF_PRIVATE_KEY],
-            )
-            try:
-                login = await client.login_by_mobile_code(
-                    country_code=info["country_code"],
-                    mobile=info["mobile"],
-                    auth_code=user_input["auth_code"],
-                    sales_country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
-                    pub_key=info["pub_key"],
-                )
-                vehicles = await client.vehicles()
-            except DeepalRateLimitError:
-                errors["base"] = "too_many_codes"
-            except DeepalApiError as err:
-                if "APP_1_1_07_002" in str(err):
-                    errors["base"] = "bad_sms_code"
-                else:
-                    errors["base"] = "login_failed"
+            if user_input.get("start_over"):
+                del self._phone_login
+                return await self.async_step_phone()
+            auth_code = str(user_input.get("auth_code") or "").strip()
+            if not auth_code:
+                errors["base"] = "bad_sms_code"
             else:
-                if not vehicles:
-                    errors["base"] = "no_vehicles"
+                info = self._phone_login
+                client = DeepalClient(
+                    async_get_clientsession(self.hass),
+                    access_token="",
+                    refresh_token=None,
+                    country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
+                    language=info.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
+                    app_version=info.get(CONF_APP_VERSION, DEFAULT_APP_VERSION),
+                    device_id=info[CONF_DEVICE_ID],
+                    private_key_pem=info[CONF_PRIVATE_KEY],
+                )
+                try:
+                    login = await client.login_by_mobile_code(
+                        country_code=info["country_code"],
+                        mobile=info["mobile"],
+                        auth_code=auth_code,
+                        sales_country=info.get(CONF_COUNTRY, DEFAULT_COUNTRY),
+                        pub_key=info["pub_key"],
+                    )
+                    vehicles = await client.vehicles()
+                except DeepalRateLimitError:
+                    errors["base"] = "too_many_codes"
+                except DeepalApiError as err:
+                    if "APP_1_1_07_002" in str(err):
+                        errors["base"] = "bad_sms_code"
+                    else:
+                        errors["base"] = "login_failed"
                 else:
-                    if self._reauth_entry is not None:
-                        return await self._async_finish_reauth(login, vehicles, info)
-                    self._login_result = {"login": login, "vehicles": vehicles, "info": info}
-                    return await self.async_step_commands()
+                    if not vehicles:
+                        errors["base"] = "no_vehicles"
+                    else:
+                        if self._reauth_entry is not None:
+                            return await self._async_finish_reauth(login, vehicles, info)
+                        self._login_result = {"login": login, "vehicles": vehicles, "info": info}
+                        return await self.async_step_commands()
 
-        schema = vol.Schema({vol.Required("auth_code"): str})
+        schema = vol.Schema(
+            {
+                vol.Optional("auth_code", default=""): str,
+                vol.Optional("start_over", default=False): bool,
+            }
+        )
         return self.async_show_form(step_id="sms", data_schema=schema, errors=errors)
 
     async def async_step_commands(self, user_input: dict[str, Any] | None = None):

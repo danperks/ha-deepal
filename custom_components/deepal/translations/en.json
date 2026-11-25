@@ -20,7 +20,11 @@
         "title": "Enter email code",
         "description": "Enter the verification code sent by Changan/Deepal. The code can expire quickly, so request a new one if it is rejected.",
         "data": {
-          "auth_code": "Email code"
+          "auth_code": "Email code",
+          "start_over": "Start over"
+        },
+        "data_description": {
+          "start_over": "Go back and request a new email code. You can leave the code blank."
         }
       },
       "phone": {
@@ -35,7 +39,11 @@
         "title": "Enter SMS code",
         "description": "Enter the verification code sent by Changan/Deepal. The code can expire quickly, so request a new one if it is rejected.",
         "data": {
-          "auth_code": "SMS code"
+          "auth_code": "SMS code",
+          "start_over": "Start over"
+        },
+        "data_description": {
+          "start_over": "Go back and request a new SMS code. You can leave the code blank."
         }
       },
       "commands": {
