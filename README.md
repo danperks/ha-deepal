@@ -77,7 +77,8 @@ No control PIN is required. Home Assistant then exposes a device tracker with th
 
 ## Notes
 
-- The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry, and re-reads it after each command.
+- The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry on that poll, and re-reads it after each command.
+- **Live MQTT** (`enable_live_mqtt`) is off by default. Turn it on from the integration's **Configure** dialog for an S05 whose `protocolType` is `MQTT`. Home Assistant then keeps one broker session open, merges partial property reports into the current state, and does not open a second MQTT connection on each poll while that session is healthy. S07 (`TLV`) and any other non-MQTT vehicle ignore the option. A door, window, or boot command pauses the live session so it does not collide with the shared MQTT client id, then starts it again. If the session drops, polls fall back to the one-shot MQTT read and the session reconnects with a 5s, 15s, 60s, then 300s delay.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
 

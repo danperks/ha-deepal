@@ -30,6 +30,7 @@ CONF_PRIVATE_KEY = "private_key_pem"
 CONF_LOGIN_METHOD = "login_method"
 CONF_ENABLE_COMMANDS = "enable_commands"
 CONF_ENABLE_API_LOGGING = "enable_api_logging"
+CONF_ENABLE_LIVE_MQTT = "enable_live_mqtt"
 CONF_ACTIVE_REFRESH_INTERVAL = "active_refresh_interval"
 CONF_RC_TOKEN = "rc_token"
 CONF_CONTROL_PIN = "control_pin"
@@ -47,6 +48,12 @@ DEFAULT_LANGUAGE = "en_US"
 DEFAULT_APP_VERSION = "V1.12.0"
 DEFAULT_SCAN_INTERVAL = 60
 DEFAULT_ACTIVE_REFRESH_INTERVAL = 300
+
+# Supervised S05 live MQTT. The first disconnect waits 5s, then 15s, 60s,
+# and 300s thereafter. The session stays off unless an owner opts in.
+MQTT_LIVE_BACKOFF_SECONDS = (5, 15, 60, 300)
+MQTT_LIVE_COALESCE_SECONDS = 0.35
+MQTT_LIVE_KEEPALIVE_SECONDS = 60
 
 BASE_URL = "https://m.iov.changanauto.com.de"
 CA_BASE_URL = "https://ca-m.iov.changanauto.com.de"

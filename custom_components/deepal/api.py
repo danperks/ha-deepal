@@ -213,9 +213,9 @@ def _mqtt_remaining_length(length: int) -> bytes:
             return bytes(out)
 
 
-def _mqtt_connect_packet(client_id: str, username: str, password: str) -> bytes:
+def _mqtt_connect_packet(client_id: str, username: str, password: str, keepalive: int = 60) -> bytes:
     payload = _mqtt_string(client_id) + _mqtt_string(username) + _mqtt_string(password)
-    variable = _mqtt_string("MQTT") + bytes([4, 0xC2]) + struct.pack("!H", 60)
+    variable = _mqtt_string("MQTT") + bytes([4, 0xC2]) + struct.pack("!H", max(0, min(65535, int(keepalive))))
     body = variable + payload
     return bytes([0x10]) + _mqtt_remaining_length(len(body)) + body
 
@@ -229,6 +229,15 @@ def _mqtt_subscribe_packet(packet_id: int, topics: list[str]) -> bytes:
 def _mqtt_publish_packet(topic: str, payload: dict[str, Any]) -> bytes:
     body = _mqtt_string(topic) + json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
     return bytes([0x30]) + _mqtt_remaining_length(len(body)) + body
+
+
+async def _open_mqtt_connection(host: str, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Open the vehicle broker TLS socket. Tests replace this with a local server."""
+    context = await asyncio.to_thread(ssl.create_default_context)
+    return await asyncio.wait_for(
+        asyncio.open_connection(host, port, ssl=context, server_hostname=host),
+        timeout=15,
+    )
 
 
 async def _mqtt_read_packet(reader: asyncio.StreamReader) -> tuple[int, bytes]:
@@ -566,6 +575,55 @@ class DeepalClient:
         self.user_id = user_id
         self._ca_tsp_token: str | None = None
         self._private_key = self._load_private_key(private_key_pem) if private_key_pem else None
+        # One broker client id (login_did) per account. The live session, the
+        # one-shot poll, and S05 commands all take this lock before connecting.
+        self._live_mqtt: Any = None
+        self.mqtt_socket_active = False
+        self.mqtt_socket_idle = asyncio.Event()
+        self.mqtt_socket_idle.set()
+        self.mqtt_transport_lock = asyncio.Lock()
+
+    @property
+    def live_mqtt(self) -> Any:
+        """Return the supervised session while it is running, if any."""
+        return self._live_mqtt
+
+    def attach_live_mqtt(self, session: Any) -> None:
+        """Register the session that currently owns live updates for this client."""
+        self._live_mqtt = session
+
+    def detach_live_mqtt(self, session: Any) -> None:
+        """Drop the session registration when its task exits."""
+        if self._live_mqtt is session:
+            self._live_mqtt = None
+
+    async def open_mqtt_connection(self, host: str, port: int) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        """Open the MQTT broker socket used by telemetry and commands."""
+        return await _open_mqtt_connection(host, port)
+
+    def _live_mqtt_snapshot(self) -> dict[str, Any] | None:
+        """Return the live session's merged condition while that socket is healthy."""
+        live = self._live_mqtt
+        if live is None or not live.healthy:
+            return None
+        latest = live.latest_condition()
+        if isinstance(latest, dict) and latest:
+            return latest
+        return None
+
+    async def _wait_for_live_snapshot(self, timeout: float = 18) -> dict[str, Any] | None:
+        """Wait while a live socket is up so a poll does not open a second client id."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            snapshot = self._live_mqtt_snapshot()
+            if snapshot is not None:
+                return snapshot
+            live = self._live_mqtt
+            busy = self.mqtt_socket_active or (live is not None and live.healthy)
+            if not busy or loop.time() >= deadline:
+                return self._live_mqtt_snapshot()
+            await asyncio.sleep(0.05)
 
     @property
     def commands_available(self) -> bool:
@@ -883,13 +941,36 @@ class DeepalClient:
         return data if isinstance(data, dict) else {}
 
     async def s05_mqtt_condition(self, vehicle_id: str) -> dict[str, Any]:
-        """Fetch and decrypt S05 condition data from the MQTT telemetry path."""
+        """Fetch and decrypt S05 condition data from the MQTT telemetry path.
+
+        A healthy live session already holds ``login_did``. Reuse its merged
+        snapshot. Opening another connection would kick that session.
+        """
         if not self.user_id:
             raise DeepalApiError("S05 MQTT telemetry requires user id; reauthenticate the integration")
 
+        snapshot = await self._wait_for_live_snapshot()
+        if snapshot is not None:
+            return snapshot
+        live = self._live_mqtt
+        if self.mqtt_socket_active or (live is not None and live.healthy):
+            raise DeepalApiError("S05 live MQTT session did not return vehicle condition")
+
         config = await self._s05_mqtt_config(vehicle_id)
         token = await self._s05_mqtt_token()
-        condition = await self._s05_mqtt_read_condition(config, token)
+        async with self.mqtt_transport_lock:
+            snapshot = self._live_mqtt_snapshot()
+            if snapshot is not None:
+                return snapshot
+            if self.mqtt_socket_active:
+                raise DeepalApiError("S05 MQTT broker identity is already in use")
+            self.mqtt_socket_active = True
+            self.mqtt_socket_idle.clear()
+            try:
+                condition = await self._s05_mqtt_read_condition(config, token)
+            finally:
+                self.mqtt_socket_active = False
+                self.mqtt_socket_idle.set()
         if not condition:
             raise DeepalApiError("S05 MQTT telemetry did not return vehicle condition")
         return condition
@@ -999,45 +1080,78 @@ class DeepalClient:
         if not all((host, login_pub_topic, login_did, command_pub_topic, command_res_topic, device_did)):
             raise DeepalApiError("S05 MQTT config did not include command topics")
 
-        context = await asyncio.to_thread(ssl.create_default_context)
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port, ssl=context, server_hostname=host),
-            timeout=15,
-        )
+        # The live listener uses the same login_did client id. Pause it and
+        # hold the transport lock for the whole command socket so the broker
+        # never sees two clients.
+        live = self._live_mqtt
+        if live is not None:
+            await live.yield_for_exclusive_connect()
+        holding = False
         try:
-            writer.write(_mqtt_connect_packet(login_did, login_did, token))
-            await writer.drain()
-            first, body = await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
-            rc = body[1] if first == 0x20 and len(body) >= 2 else None
-            if rc != 0:
-                raise DeepalApiError(f"S05 MQTT broker rejected connection: rc={rc}")
+            await self.mqtt_transport_lock.acquire()
+            holding = True
+            self.mqtt_socket_active = True
+            self.mqtt_socket_idle.clear()
+            reader, writer = await _open_mqtt_connection(host, port)
+            try:
+                writer.write(_mqtt_connect_packet(login_did, login_did, token))
+                await writer.drain()
+                first, body = await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
+                rc = body[1] if first == 0x20 and len(body) >= 2 else None
+                if rc != 0:
+                    raise DeepalApiError(f"S05 MQTT broker rejected connection: rc={rc}")
 
-            writer.write(_mqtt_subscribe_packet(1, sorted(set(topics))))
-            await writer.drain()
-            await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
+                writer.write(_mqtt_subscribe_packet(1, sorted(set(topics))))
+                await writer.drain()
+                await asyncio.wait_for(_mqtt_read_packet(reader), timeout=15)
 
-            writer.write(_mqtt_publish_packet(login_pub_topic, self._s05_login_payload(login_did)))
-            await writer.drain()
+                writer.write(_mqtt_publish_packet(login_pub_topic, self._s05_login_payload(login_did)))
+                await writer.drain()
 
-            wake_req_id: str | None = None
-            command_req_id: str | None = None
-            secret_key: str | None = None
-            deadline = time.monotonic() + _S05_COMMAND_TIMEOUT
-            while time.monotonic() < deadline:
-                first, body = await asyncio.wait_for(
-                    _mqtt_read_packet(reader), timeout=max(1, deadline - time.monotonic())
-                )
-                if first >> 4 != 3:
-                    continue
-                topic, payload, packet_id = _mqtt_parse_publish(first, body)
-                if packet_id is not None:
-                    writer.write(bytes([0x40, 0x02]) + struct.pack("!H", packet_id))
-                    await writer.drain()
+                wake_req_id: str | None = None
+                command_req_id: str | None = None
+                secret_key: str | None = None
+                deadline = time.monotonic() + _S05_COMMAND_TIMEOUT
+                while time.monotonic() < deadline:
+                    first, body = await asyncio.wait_for(
+                        _mqtt_read_packet(reader), timeout=max(1, deadline - time.monotonic())
+                    )
+                    if first >> 4 != 3:
+                        continue
+                    topic, payload, packet_id = _mqtt_parse_publish(first, body)
+                    if packet_id is not None:
+                        writer.write(bytes([0x40, 0x02]) + struct.pack("!H", packet_id))
+                        await writer.drain()
 
-                if secret_key is None:
-                    secret_key = self._s05_secret_from_payload(payload)
-                    if secret_key:
-                        wake_req_id = self._s05_req_id(device_did)
+                    if secret_key is None:
+                        secret_key = self._s05_secret_from_payload(payload)
+                        if secret_key:
+                            wake_req_id = self._s05_req_id(device_did)
+                            writer.write(
+                                _mqtt_publish_packet(
+                                    command_pub_topic,
+                                    self._s05_command_request_payload(
+                                        device_did,
+                                        login_did,
+                                        secret_key,
+                                        wake_req_id,
+                                        service_code="TxWakeup",
+                                        method="Cnr_ReWakeup",
+                                        params={},
+                                    ),
+                                )
+                            )
+                            await writer.drain()
+                        continue
+
+                    if topic != command_res_topic:
+                        continue
+                    response_req_id = _s05_payload_req_id(payload)
+                    if response_req_id == wake_req_id and command_req_id is None:
+                        # An already-awake car may reject the redundant wake; either
+                        # response proves it was processed, so send the command once.
+                        await asyncio.sleep(_S05_WAKE_SETTLE_SECONDS)
+                        command_req_id = self._s05_req_id(device_did)
                         writer.write(
                             _mqtt_publish_packet(
                                 command_pub_topic,
@@ -1045,66 +1159,48 @@ class DeepalClient:
                                     device_did,
                                     login_did,
                                     secret_key,
-                                    wake_req_id,
-                                    service_code="TxWakeup",
-                                    method="Cnr_ReWakeup",
-                                    params={},
+                                    command_req_id,
+                                    service_code=service_code,
+                                    method=method,
+                                    params=params,
                                 ),
                             )
                         )
                         await writer.drain()
-                    continue
+                        continue
 
-                if topic != command_res_topic:
-                    continue
-                response_req_id = _s05_payload_req_id(payload)
-                if response_req_id == wake_req_id and command_req_id is None:
-                    # An already-awake car may reject the redundant wake; either
-                    # response proves it was processed, so send the command once.
-                    await asyncio.sleep(_S05_WAKE_SETTLE_SECONDS)
-                    command_req_id = self._s05_req_id(device_did)
-                    writer.write(
-                        _mqtt_publish_packet(
-                            command_pub_topic,
-                            self._s05_command_request_payload(
-                                device_did,
-                                login_did,
-                                secret_key,
-                                command_req_id,
-                                service_code=service_code,
-                                method=method,
-                                params=params,
-                            ),
+                    if command_req_id is None or response_req_id != command_req_id:
+                        continue
+                    items = _s05_command_response_items(payload, secret_key, command_req_id)
+                    if self.enable_api_logging:
+                        _LOGGER.warning(
+                            "Deepal MQTT debug command service=%s method=%s params=%s response=%s",
+                            service_code,
+                            method,
+                            _redact_for_log(params),
+                            _redact_for_log(items),
                         )
-                    )
-                    await writer.drain()
-                    continue
+                    error = _s05_command_result_error(items, payload)
+                    if error:
+                        raise DeepalApiError(f"S05 command failed: {error}")
+                    return command_req_id
 
-                if command_req_id is None or response_req_id != command_req_id:
-                    continue
-                items = _s05_command_response_items(payload, secret_key, command_req_id)
-                if self.enable_api_logging:
-                    _LOGGER.warning(
-                        "Deepal MQTT debug command service=%s method=%s params=%s response=%s",
-                        service_code,
-                        method,
-                        _redact_for_log(params),
-                        _redact_for_log(items),
-                    )
-                error = _s05_command_result_error(items, payload)
-                if error:
-                    raise DeepalApiError(f"S05 command failed: {error}")
-                return command_req_id
-
-            raise DeepalApiError("S05 MQTT command timed out without a correlated response")
-        except TimeoutError as err:
-            raise DeepalApiError("S05 MQTT command timed out without a correlated response") from err
+                raise DeepalApiError("S05 MQTT command timed out without a correlated response")
+            except TimeoutError as err:
+                raise DeepalApiError("S05 MQTT command timed out without a correlated response") from err
+            finally:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (ConnectionError, TimeoutError, ssl.SSLError):
+                    pass
         finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except (ConnectionError, TimeoutError, ssl.SSLError):
-                pass
+            if holding:
+                self.mqtt_socket_active = False
+                self.mqtt_socket_idle.set()
+                if live is not None:
+                    live.resume_after_exclusive_connect()
+                self.mqtt_transport_lock.release()
 
     async def _s05_mqtt_read_condition(self, config: dict[str, Any], token: str) -> dict[str, Any]:
         info = ((config.get("mqttConnectionInfos") or [None])[0]) or {}
@@ -1135,14 +1231,7 @@ class DeepalClient:
         if not host or not login_pub_topic or not login_did or not properties_get_topic or not device_did:
             raise DeepalApiError("S05 MQTT config did not include required topics")
 
-        # Loading the system trust store is blocking I/O; keep it off the event loop.
-        context = await asyncio.to_thread(ssl.create_default_context)
-        reader: asyncio.StreamReader
-        writer: asyncio.StreamWriter
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port, ssl=context, server_hostname=host),
-            timeout=15,
-        )
+        reader, writer = await _open_mqtt_connection(host, port)
         try:
             writer.write(_mqtt_connect_packet(login_did, login_did, token))
             await writer.drain()
@@ -1310,7 +1399,7 @@ class DeepalClient:
             try:
                 items = _s05_aes_decrypt(encrypted, secret_key, req_id)
             except (ValueError, json.JSONDecodeError, gzip.BadGzipFile) as err:
-                _LOGGER.debug("Failed to decrypt S05 MQTT %s payload: %s", field, err)
+                _LOGGER.debug("Failed to decrypt S05 MQTT %s payload (%s)", field, type(err).__name__)
                 continue
             for item in items:
                 if not isinstance(item, dict):

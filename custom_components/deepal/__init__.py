@@ -33,7 +33,7 @@ from .const import (
     PLATFORMS,
     SERVICE_AUTHORIZE_QR,
 )
-from .coordinator import DeepalDataUpdateCoordinator
+from .coordinator import DeepalDataUpdateCoordinator, should_start_live_mqtt
 
 _AUTHORIZE_QR_SCHEMA = vol.Schema(
     {
@@ -67,6 +67,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    vehicle = (coordinator.data or {}).get("vehicle") or {}
+    if should_start_live_mqtt(entry.options, vehicle):
+        coordinator.start_live_mqtt()
+        entry.async_on_unload(coordinator.async_stop_live_mqtt)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     _async_register_authorize_qr_service(hass)
     return True
