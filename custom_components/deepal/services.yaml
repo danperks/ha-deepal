@@ -1,0 +1,24 @@
+authorize_qr:
+  name: Authorize location QR
+  description: >-
+    Authorise head-unit location sharing. Paste the QR URL from the car's
+    Privacy → Location permission screen, or the bare qrCode token. No control
+    PIN is required. The code changes each time that screen is opened.
+  fields:
+    qr_code:
+      name: QR code
+      description: >-
+        Full QR URL (the link contains qrCode=) or the bare token.
+      required: true
+      example: "https://ca-m.iov.changanauto.com.de/intl-app-gw/intl-app-user/api/qr-code/tmp-auth/scan?qrCode=00000000-0000-4000-8000-000000000000"
+      selector:
+        text:
+    entry_id:
+      name: Config entry
+      description: >-
+        Deepal config entry to authorise. Required only when more than one
+        Deepal vehicle is set up.
+      required: false
+      selector:
+        config_entry:
+          integration: deepal

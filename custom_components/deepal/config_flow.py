@@ -11,6 +11,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -31,6 +32,7 @@ from .const import (
     CONF_LANGUAGE,
     CONF_LOGIN_METHOD,
     CONF_PRIVATE_KEY,
+    CONF_QR_AUTH_URL,
     CONF_RC_TOKEN,
     CONF_REAUTHENTICATE,
     CONF_REFRESH_TOKEN,
@@ -419,8 +421,19 @@ class DeepalOptionsFlow(config_entries.OptionsFlow):
             if user_input.pop(CONF_REAUTHENTICATE, False):
                 self._config_entry.async_start_reauth(self.hass)
                 return self.async_abort(reason="reauth_triggered")
+            qr_auth_url = str(user_input.pop(CONF_QR_AUTH_URL, "") or "").strip()
             if user_input.get(CONF_ENABLE_COMMANDS) and not str(user_input.get(CONF_CONTROL_PIN) or "").strip():
                 errors[CONF_CONTROL_PIN] = "pin_required"
+            elif qr_auth_url:
+                coordinator = getattr(self._config_entry, "runtime_data", None)
+                try:
+                    if coordinator is None:
+                        raise DeepalApiError("Deepal entry is not loaded")
+                    await coordinator.async_authorize_qr_code(qr_auth_url)
+                except (DeepalApiError, HomeAssistantError):
+                    errors[CONF_QR_AUTH_URL] = "qr_auth_failed"
+                else:
+                    return self.async_create_entry(title="", data=user_input)
             else:
                 return self.async_create_entry(title="", data=user_input)
 
@@ -448,6 +461,7 @@ class DeepalOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_CONTROL_PIN, default=data.get(CONF_CONTROL_PIN, "")): str,
                 vol.Optional(CONF_ENABLE_COMMANDS, default=data.get(CONF_ENABLE_COMMANDS, False)): bool,
                 vol.Optional(CONF_ENABLE_API_LOGGING, default=data.get(CONF_ENABLE_API_LOGGING, False)): bool,
+                vol.Optional(CONF_QR_AUTH_URL, default=""): str,
                 vol.Optional(CONF_REAUTHENTICATE, default=False): bool,
             }
         )

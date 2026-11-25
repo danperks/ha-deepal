@@ -15,6 +15,7 @@ import struct
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 from cryptography.hazmat.primitives import hashes, padding as symmetric_padding, serialization
@@ -78,6 +79,7 @@ _SENSITIVE_EXACT_KEYS = {
     "public_key",
     "pubkey",
     "publickey",
+    "qrcode",
     "rctoken",
     "refresh_token",
     "refreshtoken",
@@ -148,6 +150,50 @@ def _redact_for_log(value: Any) -> Any:
 def _safe_log_headers(headers: dict[str, str]) -> dict[str, str]:
     """Return only non-sensitive headers useful for debugging country/region behavior."""
     return {key: headers[key] for key in _SAFE_LOG_HEADER_KEYS if key in headers}
+
+
+def _qr_code_from_query(query: str) -> str | None:
+    """Return the first non-empty qrCode query value."""
+    if not query:
+        return None
+    values = parse_qs(query, keep_blank_values=False).get("qrCode")
+    if not values:
+        return None
+    code = values[0].strip()
+    return code or None
+
+
+def extract_qr_code(value: str) -> str:
+    """Return a tmp-auth qrCode from a pasted URL or a bare token.
+
+    Head-unit QR codes encode
+    ``.../api/qr-code/tmp-auth/scan?qrCode=<uuid>``. Some app links put that
+    query in a ``#/...?qrCode=`` fragment instead.
+    """
+    raw = value.strip()
+    if not raw:
+        raise ValueError("QR code is empty")
+    if "://" in raw or "qrCode=" in raw:
+        split = urlsplit(raw)
+        code = _qr_code_from_query(split.query)
+        if not code and split.fragment:
+            fragment = split.fragment
+            if "?" in fragment:
+                fragment_query = fragment.split("?", 1)[1]
+            elif "qrCode=" in fragment:
+                fragment_query = fragment
+            else:
+                fragment_query = ""
+            code = _qr_code_from_query(fragment_query)
+        if not code and "qrCode=" in raw and not split.query:
+            _, _, tail = raw.partition("qrCode=")
+            code = unquote(tail.split("&", 1)[0]).strip() or None
+        if not code:
+            raise ValueError("QR URL did not include a qrCode")
+        return code
+    if any(char.isspace() for char in raw):
+        raise ValueError("QR code must be a single token")
+    return raw
 
 
 def _mqtt_string(value: str) -> bytes:
@@ -431,6 +477,26 @@ def _s05_condition_from_params(params: dict[str, Any]) -> dict[str, Any]:
         },
         "rawS05": params,
     }
+    if any(
+        key in params
+        for key in (
+            "lat",
+            "lng",
+            "carLocationLatitude",
+            "carLocationLongitude",
+            "locationSwitch",
+            "gpsTime",
+        )
+    ):
+        condition["locationGeo"] = {
+            "lat": _first(params, "lat", "carLocationLatitude"),
+            "lng": _first(params, "lng", "carLocationLongitude"),
+            "alti": params.get("alti"),
+            "heading": params.get("heading"),
+            "satNum": params.get("satNum"),
+            "gpsTime": params.get("gpsTime"),
+            "locationSwitch": params.get("locationSwitch"),
+        }
     return condition
 
 
@@ -697,6 +763,29 @@ class DeepalClient:
             self.cac_token = data.get("cacToken")
         self._ca_tsp_token = None
         return self.tokens
+
+    async def authorize_qr_code(self, qr_code_or_url: str) -> dict[str, Any]:
+        """Authorise a head-unit location-permission QR code.
+
+        The car shows a QR from Privacy → Location permission. Scanning it in the
+        official app is two signed posts and does not use the control PIN.
+        ``_post`` rewrites ``/intl-app-gw/`` for regional accounts such as AU.
+        """
+        try:
+            qr_code = extract_qr_code(qr_code_or_url)
+        except ValueError as err:
+            raise DeepalApiError(str(err)) from err
+        scan_data = await self._post(
+            "/intl-app-gw/intl-app-user/api/qr-code/tmp-auth/scan",
+            {"qrCode": qr_code},
+            retry=False,
+        )
+        confirm_data = await self._post(
+            "/intl-app-gw/intl-app-user/api/qr-code/tmp-auth/confirm",
+            {"qrCode": qr_code},
+            retry=False,
+        )
+        return {"qr_code": qr_code, "scan": scan_data, "confirm": confirm_data}
 
     async def send_auth_code(self, *, country_code: str, mobile: str) -> None:
         """Request an SMS login code."""

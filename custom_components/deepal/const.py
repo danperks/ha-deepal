@@ -15,6 +15,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SWITCH,
     Platform.TIME,
+    Platform.DEVICE_TRACKER,
 ]
 
 CONF_ACCESS_TOKEN = "access_token"
@@ -37,6 +38,9 @@ CONF_USER_ID = "user_id"
 CONF_CA_USER_ID = "ca_user_id"
 CONF_CAC_USER_ID = "cac_user_id"
 CONF_REAUTHENTICATE = "reauthenticate"
+CONF_QR_AUTH_URL = "qr_auth_url"
+
+SERVICE_AUTHORIZE_QR = "authorize_qr"
 
 DEFAULT_COUNTRY = "GB"
 DEFAULT_LANGUAGE = "en_US"

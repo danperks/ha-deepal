@@ -37,6 +37,7 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 - Driver and front passenger seat heating and ventilation levels.
 - Steering wheel heating switch.
 - S07 charge limit and charging schedule controls.
+- Vehicle location device tracker, after the head unit's location permission is authorised.
 
 S05 controls are new and have only been tested on a few cars, so please report anything that doesn't work.
 
@@ -63,6 +64,16 @@ S05 controls are new and have only been tested on a few cars, so please report a
 You can also configure it manually from **Settings -> Devices & services -> Add integration**, then search for **Changan Deepal Cloud**.
 
 During setup, choose the same login method you use in the official Deepal app. If phone/SMS login says the account is not registered, try email-code login instead. You can choose whether to enable remote commands; remote commands require the same control PIN used by the official Deepal app. Existing S05 entries can enable them from the integration's **Configure** dialog.
+
+## Location
+
+The head unit shares vehicle location only after you allow it under **Privacy → Location permission**. That screen shows a QR code. Paste the QR URL, or the bare `qrCode` value, into any of these:
+
+- The integration's **Configure** dialog, in **Location permission QR URL**. The URL is used once and is not saved.
+- The repair that Home Assistant raises while location sharing is off.
+- The `deepal.authorize_qr` service. Pass `qr_code`, and pass `entry_id` when more than one Deepal vehicle is set up.
+
+No control PIN is required. Home Assistant then exposes a device tracker with the car's GPS coordinates plus altitude, heading, satellite count, GPS time, and whether location sharing is on. The tracker stays unavailable until sharing is on and the car has reported a position.
 
 ## Notes
 

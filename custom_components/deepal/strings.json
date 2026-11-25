@@ -67,13 +67,14 @@
     "step": {
       "init": {
         "title": "Changan Deepal Cloud options",
-        "description": "Tune how often Home Assistant reads cached cloud data and how often it asks the vehicle for fresh data. Remote commands require the control PIN from the Deepal app.",
+        "description": "Tune how often Home Assistant reads cached cloud data and how often it asks the vehicle for fresh data. Remote commands require the control PIN from the Deepal app. To allow vehicle location, paste the QR URL from the head unit's Privacy → Location permission screen. That URL is used once and is not saved.",
         "data": {
           "scan_interval": "Status poll interval",
           "active_refresh_interval": "Vehicle refresh interval",
           "control_pin": "Control PIN",
           "enable_commands": "Enable remote commands",
           "enable_api_logging": "Enable redacted API logging",
+          "qr_auth_url": "Location permission QR URL",
           "reauthenticate": "Reauthenticate now"
         },
         "data_description": {
@@ -82,9 +83,13 @@
           "control_pin": "The same PIN used for remote controls in the official Deepal app. Required when remote commands are enabled.",
           "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, seat and steering wheel heating, lights, and horn.",
           "enable_api_logging": "Write redacted Deepal API requests and responses to the Home Assistant log for troubleshooting. Tokens, PINs, signatures, keys, and account identifiers are filtered, but vehicle data may still appear. Leave disabled unless debugging.",
-          "reauthenticate": "Log in again to register a fresh command-signing key without removing the integration. Use this if remote commands fail while vehicle data still updates. Other changes in the same submission are ignored."
+          "reauthenticate": "Log in again to register a fresh command-signing key without removing the integration. Use this if remote commands fail while vehicle data still updates. Other changes in the same submission are ignored.",
+          "qr_auth_url": "Paste the QR link from the car head unit (Privacy → Location permission), or the bare qrCode token. Leave blank to skip. This is not stored."
         }
       }
+    },
+    "error": {
+      "qr_auth_failed": "Could not authorise that QR code. Open the location permission screen on the car again and paste the new URL."
     },
     "abort": {
       "reauth_triggered": "Reauthentication started. Follow the Home Assistant notification to finish logging in again."
@@ -99,6 +104,24 @@
           "confirm": {
             "title": "Deepal remote commands need reauthentication",
             "description": "This logs in again to register a fresh command-signing key. Home Assistant will show a notification to finish logging in once you confirm."
+          }
+        }
+      }
+    },
+    "location_permission": {
+      "title": "Deepal location permission is off",
+      "description": "The car is not sharing its location. On the head unit, open Privacy → Location permission, then paste the QR URL into this repair.",
+      "fix_flow": {
+        "error": {
+          "qr_auth_failed": "Could not authorise that QR code. Open the location permission screen on the car again and paste the new URL."
+        },
+        "step": {
+          "authorize": {
+            "title": "Authorise Deepal location permission",
+            "description": "Paste the QR URL shown on the car head unit under Privacy → Location permission. The code changes each time that screen is opened. Home Assistant sends it to your Deepal account; no control PIN is required.",
+            "data": {
+              "qr_auth_url": "QR URL"
+            }
           }
         }
       }
@@ -200,6 +223,9 @@
     "time": {
       "charge_schedule_start_time": {"name": "Charge schedule start"},
       "charge_schedule_end_time": {"name": "Charge schedule end"}
+    },
+    "device_tracker": {
+      "location": {"name": "Location"}
     }
   }
 }
