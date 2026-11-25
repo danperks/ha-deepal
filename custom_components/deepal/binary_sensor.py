@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .api import _as_int
 from .coordinator import DeepalDataUpdateCoordinator
 from .entity import DeepalEntity
 
@@ -46,6 +47,17 @@ def _charge_cable_connected(data: dict[str, Any]) -> bool | None:
     if charge_connection is None:
         return None
     return charge_connection not in (0, 1)
+
+
+def _tire_warning(data: dict[str, Any], wheel: str) -> bool | None:
+    """Return whether one wheel's pressure warning is active."""
+    warning = _path_value(data, ("tire", wheel, "warning"))
+    if warning is None:
+        return None
+    parsed = _as_int(warning)
+    if parsed is None:
+        return None
+    return parsed != 0
 
 
 def _charge_schedule(data: dict[str, Any]) -> dict[str, Any]:
@@ -97,6 +109,10 @@ BINARY_SENSOR_NAMES = {
     "front_passenger_seat_heater_on": "Front passenger seat heater on",
     "driver_seat_ventilation_on": "Driver seat ventilation on",
     "front_passenger_seat_ventilation_on": "Front passenger seat ventilation on",
+    "tire_left_front_warning": "Left front tire pressure warning",
+    "tire_right_front_warning": "Right front tire pressure warning",
+    "tire_left_rear_warning": "Left rear tire pressure warning",
+    "tire_right_rear_warning": "Right rear tire pressure warning",
 }
 
 
@@ -260,6 +276,30 @@ BINARY_SENSORS: tuple[DeepalBinarySensorDescription, ...] = (
         key="front_passenger_seat_ventilation_on",
         translation_key="front_passenger_seat_ventilation_on",
         value_fn=lambda data: _path_value(data, ("seat", "leftFront", "ventStatus")) != 0 if _path_value(data, ("seat", "leftFront", "ventStatus")) is not None else None,
+    ),
+    DeepalBinarySensorDescription(
+        key="tire_left_front_warning",
+        translation_key="tire_left_front_warning",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda data: _tire_warning(data, "leftFront"),
+    ),
+    DeepalBinarySensorDescription(
+        key="tire_right_front_warning",
+        translation_key="tire_right_front_warning",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda data: _tire_warning(data, "rightFront"),
+    ),
+    DeepalBinarySensorDescription(
+        key="tire_left_rear_warning",
+        translation_key="tire_left_rear_warning",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda data: _tire_warning(data, "leftBack"),
+    ),
+    DeepalBinarySensorDescription(
+        key="tire_right_rear_warning",
+        translation_key="tire_right_rear_warning",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda data: _tire_warning(data, "rightBack"),
     ),
 )
 

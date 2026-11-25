@@ -15,7 +15,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import DeepalApiError, DeepalAuthError, DeepalClient, _as_int
+from .api import DeepalApiError, DeepalAuthError, DeepalClient, _as_int, normalize_condition_fuel
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_ACTIVE_REFRESH_INTERVAL,
@@ -67,6 +67,8 @@ class DeepalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self.last_refresh_failure = None
         vehicle = self._vehicle_from_list(vehicles)
+        if isinstance(condition, dict):
+            normalize_condition_fuel(condition)
         self._async_sync_location_permission_issue(condition)
         return {"vehicles": vehicles, "vehicle": vehicle or {}, "condition": condition}
 
@@ -235,6 +237,8 @@ class DeepalDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _async_set_condition(self, condition: dict[str, Any]) -> None:
         """Update coordinator data with a freshly fetched condition payload."""
+        if isinstance(condition, dict):
+            normalize_condition_fuel(condition)
         data = dict(self.data or {})
         data["condition"] = condition
         self.async_set_updated_data(data)

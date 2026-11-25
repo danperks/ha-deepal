@@ -37,6 +37,8 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 - Driver and front passenger seat heating and ventilation levels.
 - Steering wheel heating switch.
 - S07 charge limit and charging schedule controls.
+- S05 plug-in hybrid fuel level, fuel volume, and fuel range. Those sensors appear only when the car reports fuel, so battery-electric cars do not get empty fuel entities.
+- A tyre-pressure warning for each wheel.
 - Vehicle location device tracker, after the head unit's location permission is authorised.
 
 S05 controls are new and have only been tested on a few cars, so please report anything that doesn't work.
@@ -80,6 +82,7 @@ No control PIN is required. Home Assistant then exposes a device tracker with th
 - The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry, and re-reads it after each command.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
+- Readings the car uses as placeholders (a non-finite number, a state of charge outside 0–100%, an 8191-minute charge estimate, or a -400 A wake current) are shown as unknown.
 
 ## Development Status
 

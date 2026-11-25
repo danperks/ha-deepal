@@ -10,6 +10,7 @@ import gzip
 import hashlib
 import json
 import logging
+import math
 import ssl
 import struct
 import time
@@ -345,21 +346,296 @@ def _s05_command_result_error(items: list[dict[str, Any]], payload: dict[str, An
 
 
 def _as_int(value: Any) -> int | None:
-    if value is None:
+    """Return an int, or None for a missing, non-numeric, or non-finite value."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    number = _as_float(value)
+    if number is None:
         return None
     try:
-        return int(float(value))
-    except (TypeError, ValueError):
+        return int(number)
+    except (OverflowError, ValueError):
         return None
 
 
 def _as_float(value: Any) -> float | None:
-    if value is None:
+    """Return a finite float, or None for anything else, including NaN and Infinity."""
+    if value is None or isinstance(value, bool):
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
+
+
+# The app reports 8191 (0x1FFF) when it has no remaining-charge estimate.
+_CHARGE_TIME_SENTINEL = 8191
+# No live S05 charging current approaches this. 2538 A was a parked-car glitch.
+_MAX_CHARGE_CURRENT_A = 600.0
+# Wake bursts publish -400.0 A with no charging state. A real ~400 A draw only
+# happens while DC charging (state 4), and it is positive.
+_WAKE_DC_CURRENT_SENTINEL_A = 400.0
+# S05 ChrgSts, observed live (Sunek0/ha-deepal-alternative, MIT): 0 not charging,
+# 1 AC plugged, 2 DC plugged, 3 AC charging, 4 DC charging, 5 charge stopped,
+# 8 waiting for an AC schedule. Anything else must not be translated into a state.
+_CHARGE_STATES = frozenset({0, 1, 2, 3, 4, 5, 8})
+_CHARGING_STATES = frozenset({3, 4})
+_AC_GUN_STATES = frozenset({1, 3, 8})
+_DC_GUN_STATES = frozenset({2, 4})
+_FUEL_LEVEL_KEYS = ("levelPercent", "leftPercent", "remainingFuel")
+_FUEL_VOLUME_KEYS = ("volumeL", "leftVolume", "fuelLeftover")
+_FUEL_RANGE_KEYS = (
+    "remainingRangeKm",
+    "remainingRange",
+    "remainedOilMile",
+    "fuelWltcRemainingMileage",
+    "fuelNedcRemainingMileage",
+    "fuelCltcRemainingMileage",
+    "fuelSumRemainingMileage",
+)
+
+
+def _percent_or_none(value: int | None) -> int | None:
+    """Return a percentage only inside 0..100. Markers such as SOC 255 are unknown."""
+    if value is None or value < 0 or value > 100:
+        return None
+    return value
+
+
+def remaining_charge_minutes(value: Any, *, actively_charging: bool) -> int | None:
+    """Return remaining charge minutes, dropping sentinels.
+
+    8191 means the car has no estimate. 0 is only a real reading while the car
+    is actively charging; a parked car publishes 0 as a module default.
+    """
+    minutes = _as_int(value)
+    if minutes is None or minutes == _CHARGE_TIME_SENTINEL or minutes < 0:
+        return None
+    if minutes == 0 and not actively_charging:
+        return None
+    return minutes
+
+
+def cabin_humidity_percent(value: Any) -> float | None:
+    """Return relative humidity in percent.
+
+    S07 REST already reports 0..100 %. Zero is the body module's offline
+    placeholder, and a value above 100 is not a percentage. S05 MQTT absolute
+    humidity is converted before it is stored here.
+    """
+    humidity = _as_float(value)
+    if humidity is None or humidity <= 0 or humidity > 100:
+        return None
+    return humidity
+
+
+def _absolute_humidity_gm3(value: Any) -> float | None:
+    """Return S05 cabin absolute humidity in g/m³.
+
+    ``innerHumidity`` is g/m³ with one implied decimal (153 means 15.3). 0 is
+    the offline placeholder, not dry air.
+    """
+    raw = _as_float(value)
+    if raw is None or not 0 < raw <= 1000:
+        return None
+    return round(raw / 10, 1)
+
+
+def _relative_humidity_percent(absolute_gm3: float | None, temperature_c: float | None) -> float | None:
+    """Derive relative humidity with the Magnus saturation formula over water.
+
+    ``e_s(T) = 6.112·exp(17.62·T/(243.12+T))`` hPa and
+    ``e = AH·(T+273.15)/216.7`` hPa. Both inputs are required. The result is
+    capped at 100 and rounded to one decimal, matching a live S05 PHEV
+    (15.3 g/m³ at 19 °C → 94.1 %).
+    """
+    if absolute_gm3 is None or temperature_c is None:
+        return None
+    if absolute_gm3 <= 0 or temperature_c <= -243.12:
+        return None
+    saturation = 6.112 * math.exp(17.62 * temperature_c / (243.12 + temperature_c))
+    if saturation <= 0:
+        return None
+    vapour_pressure = absolute_gm3 * (temperature_c + 273.15) / 216.7
+    return round(min(100.0, 100.0 * vapour_pressure / saturation), 1)
+
+
+def _s05_humidity_percent(params: dict[str, Any]) -> float | None:
+    """Convert S05 MQTT ``innerHumidity`` into a relative humidity percentage."""
+    return _relative_humidity_percent(
+        _absolute_humidity_gm3(params.get("innerHumidity")),
+        _as_float(params.get("vehicleTemperature")),
+    )
+
+
+def _charge_state(value: Any) -> int | None:
+    parsed = _as_int(value)
+    if parsed in _CHARGE_STATES:
+        return parsed
+    return None
+
+
+def _gun_connected(value: Any) -> bool | None:
+    """Return whether a raw gun field says connected. Only 0 means unplugged."""
+    code = _as_int(value)
+    if code is None:
+        return None
+    return code != 0
+
+
+def _charge_gun_flags(
+    state: int | None, ac_raw: Any, dc_raw: Any
+) -> tuple[bool | None, bool | None, bool | None]:
+    """Return (cable plugged, AC gun, DC gun).
+
+    States 1-4 and 8 identify the gun. State 0 means unplugged on every S05:
+    the raw AC field can stay at 1 for a long time after the cable is removed.
+    State 5 means the charge stopped with the cable still connected.
+    """
+    if state in _AC_GUN_STATES | _DC_GUN_STATES:
+        return True, state in _AC_GUN_STATES, state in _DC_GUN_STATES
+    if state == 5:
+        if _gun_connected(dc_raw):
+            return True, False, True
+        return True, True, False
+    if state == 0:
+        return False, False, False
+    ac_gun = _gun_connected(ac_raw)
+    dc_gun = _gun_connected(dc_raw)
+    if ac_gun or dc_gun:
+        plugged: bool | None = True
+    elif ac_gun is False or dc_gun is False:
+        plugged = False
+    else:
+        plugged = None
+    return plugged, ac_gun, dc_gun
+
+
+def _clean_charge_magnitude(value: Any) -> float | None:
+    """Return a believable charging current as a positive magnitude, in amps."""
+    current = _as_float(value)
+    if current is None or abs(current) > _MAX_CHARGE_CURRENT_A:
+        return None
+    return abs(current)
+
+
+def _s05_charge_currents(
+    ac_value: Any, dc_value: Any, state: int | None
+) -> tuple[float | None, float | None, float | None]:
+    """Return (AC amps, DC amps, active amps) for one S05 report.
+
+    Negative readings use the battery sign and are published as magnitudes.
+    -400 A is the DC module-init sentinel and is unknown, not 400 A. Known
+    states that are not actively charging publish 0 instead of a stale current.
+    """
+    ac_raw = _as_float(ac_value)
+    dc_raw = _as_float(dc_value)
+    dc_is_sentinel = dc_raw is not None and (
+        dc_raw == -_WAKE_DC_CURRENT_SENTINEL_A
+        or (state != 4 and abs(dc_raw) >= _WAKE_DC_CURRENT_SENTINEL_A)
+    )
+    ac_reported = ac_raw is not None
+    dc_reported = dc_raw is not None and not dc_is_sentinel
+    ac_amps = _clean_charge_magnitude(ac_value)
+    dc_amps = None if dc_is_sentinel else _clean_charge_magnitude(dc_value)
+    if state == 4:
+        return (0.0 if ac_reported else None), dc_amps, dc_amps
+    if state == 3:
+        return ac_amps, (0.0 if dc_reported else None), ac_amps
+    if state is not None:
+        return (
+            0.0 if ac_reported else None,
+            0.0 if dc_reported else None,
+            0.0 if ac_reported or dc_reported else None,
+        )
+    active = ac_amps if ac_amps not in (None, 0) else dc_amps
+    if active is None and ac_amps is not None:
+        active = 0.0
+    return ac_amps, dc_amps, active
+
+
+def _connection_code(connected: bool | None) -> int | None:
+    """Map a cable flag onto ``chargeConStatus``.
+
+    The cable entity treats 0 and 1 as unplugged and any other value as plugged.
+    """
+    if connected is None:
+        return None
+    return 3 if connected else 0
+
+
+def _dc_gun_code(connected: bool | None) -> int | None:
+    """Map a DC gun flag onto ``dcChargeGunConnectStatus``.
+
+    The binary sensor treats 0 as connected, which is the S07 REST polarity.
+    """
+    if connected is None:
+        return None
+    return 0 if connected else 1
+
+
+def _shared_charge_status(state: int | None) -> int | None:
+    """Map S05 ``ChrgSts`` onto the charging entity.
+
+    A non-zero ``chargeStatus`` means actively charging. States 3 and 4 are
+    kept so AC and DC stay distinct. Stopped, plugged-idle, schedule-wait and
+    unplugged are 0.
+    """
+    if state in _CHARGING_STATES:
+        return state
+    if state is None:
+        return None
+    return 0
+
+
+def _pick_present(sources: list[dict[str, Any]], keys: tuple[str, ...]) -> Any:
+    for source in sources:
+        for key in keys:
+            if key in source and source[key] is not None:
+                return source[key]
+    return None
+
+
+def _sources_have(sources: list[dict[str, Any]], keys: tuple[str, ...]) -> bool:
+    return any(key in source for source in sources for key in keys)
+
+
+def normalize_condition_fuel(condition: dict[str, Any]) -> None:
+    """Copy REST or MQTT fuel readings into ``condition["fuel"]`` when present.
+
+    Canonical keys are ``levelPercent``, ``volumeL`` and ``remainingRangeKm``.
+    No tank-capacity field is kept: the car does not report one. A payload with
+    no fuel keys, including an S07 or S05 BEV, is left unchanged.
+    """
+    if not isinstance(condition, dict):
+        return
+    sources: list[dict[str, Any]] = []
+    fuel = condition.get("fuel")
+    status = condition.get("vehicleStatus")
+    if isinstance(fuel, dict):
+        sources.append(fuel)
+    if isinstance(status, dict):
+        sources.append(status)
+    has_level = _sources_have(sources, _FUEL_LEVEL_KEYS)
+    has_volume = _sources_have(sources, _FUEL_VOLUME_KEYS)
+    has_range = _sources_have(sources, _FUEL_RANGE_KEYS)
+    if not (has_level or has_volume or has_range):
+        return
+    level = _percent_or_none(_as_int(_pick_present(sources, _FUEL_LEVEL_KEYS))) if has_level else None
+    volume = _as_float(_pick_present(sources, _FUEL_VOLUME_KEYS)) if has_volume else None
+    remaining_km = _as_int(_pick_present(sources, _FUEL_RANGE_KEYS)) if has_range else None
+    if level is None and volume is None and remaining_km is None:
+        if isinstance(fuel, dict):
+            condition.pop("fuel", None)
+        return
+    condition["fuel"] = {
+        "levelPercent": level,
+        "volumeL": volume,
+        "remainingRangeKm": remaining_km,
+    }
 
 
 def _iso_to_millis(value: Any) -> int | None:
@@ -384,10 +660,24 @@ def _first(params: dict[str, Any], *keys: str) -> Any:
 
 def _s05_condition_from_params(params: dict[str, Any]) -> dict[str, Any]:
     latest = _first(params, "latestDate", "lastUpdatedAt")
+    inside_c = _as_float(params.get("vehicleTemperature"))
+    outside_c = _as_float(_first(params, "outsideTemperature", "externalTemperature"))
+    target_c = _as_float(params.get("airConditioningSetTemperature"))
+    charge_state = _charge_state(params.get("ChrgSts"))
+    ac_current, dc_current, active_current = _s05_charge_currents(
+        _first(params, "BattACChrgInCurr", "battACChrgInCurr"),
+        _first(params, "BattDCChrgInCurr", "battDCChrgInCurr"),
+        charge_state,
+    )
+    plugged, _ac_gun, dc_gun = _charge_gun_flags(
+        charge_state,
+        params.get("acChargeGunConnectionState"),
+        _first(params, "dcChargeGunConnectionState", "dcDhargeGunConnectionState"),
+    )
     condition: dict[str, Any] = {
         "lastUpdatedAt": _iso_to_millis(latest) or int(time.time() * 1000),
         "vehicleStatus": {
-            "soc": _as_int(_first(params, "soc", "socDsp", "remainPower")),
+            "soc": _percent_or_none(_as_int(_first(params, "soc", "socDsp", "remainPower"))),
             "drvMileage": _as_int(_first(params, "remainedPowerMile", "totalResidualMileage")),
             "totalMileage": _as_float(params.get("totalOdometer")),
             "engineSts": _as_int(params.get("engineStatus")),
@@ -398,13 +688,10 @@ def _s05_condition_from_params(params: dict[str, Any]) -> dict[str, Any]:
             "steeringWheelHeaterLevel": _as_int(params.get("steeringWheelHeating")),
         },
         "hvac": {
-            "insideTemp": _as_float(params.get("vehicleTemperature")) * 10
-            if _as_float(params.get("vehicleTemperature")) is not None
-            else None,
-            "insideHumidity": _as_float(params.get("innerHumidity")),
-            "remoteTemp": _as_float(params.get("airConditioningSetTemperature")) * 10
-            if _as_float(params.get("airConditioningSetTemperature")) is not None
-            else None,
+            "insideTemp": inside_c * 10 if inside_c is not None else None,
+            "outsideTemp": outside_c * 10 if outside_c is not None else None,
+            "insideHumidity": _s05_humidity_percent(params),
+            "remoteTemp": target_c * 10 if target_c is not None else None,
             "acStatus": _as_int(params.get("airStatus")),
             "defrostStatus": _as_int(params.get("frontDefrostStatus")),
             "insideAirQualityLevel": _as_int(params.get("airPurifierStatus")),
@@ -412,13 +699,16 @@ def _s05_condition_from_params(params: dict[str, Any]) -> dict[str, Any]:
             "fanLevel": _as_int(params.get("airConditioningHairRatings")),
         },
         "charge": {
-            "chargeStatus": _as_int(params.get("ChrgSts")),
-            "chargeConStatus": _as_int(_first(params, "acChargeGunConnectionState", "dcChargeGunConnectionState")),
-            "acChargeCurrent": _as_float(_first(params, "BattACChrgInCurr", "battACChrgInCurr")),
-            "dcChargeCurrent": _as_float(_first(params, "BattDCChrgInCurr", "battDCChrgInCurr")),
-            "chargeCurrent": _as_float(_first(params, "BattACChrgInCurr", "BattDCChrgInCurr", "battACChrgInCurr", "battDCChrgInCurr")),
-            "remainChargeTime": _as_int(params.get("chargDeltMins")),
-            "dcChargeGunConnectStatus": _as_int(params.get("dcChargeGunConnectionState")),
+            "chargeStatus": _shared_charge_status(charge_state),
+            "chargeConStatus": _connection_code(plugged),
+            "acChargeCurrent": ac_current,
+            "dcChargeCurrent": dc_current,
+            "chargeCurrent": active_current,
+            "remainChargeTime": remaining_charge_minutes(
+                params.get("chargDeltMins"),
+                actively_charging=charge_state in _CHARGING_STATES,
+            ),
+            "dcChargeGunConnectStatus": _dc_gun_code(dc_gun),
             "chargeCoverStatus": _as_int(params.get("chargeCoverStatus")),
         },
         "door": {
@@ -477,6 +767,15 @@ def _s05_condition_from_params(params: dict[str, Any]) -> dict[str, Any]:
         },
         "rawS05": params,
     }
+    if any(key in params for key in ("remainingFuel", "fuelLeftover", "remainedOilMile")):
+        condition["fuel"] = {
+            "levelPercent": _percent_or_none(_as_int(params.get("remainingFuel")))
+            if "remainingFuel" in params
+            else None,
+            "volumeL": _as_float(params.get("fuelLeftover")) if "fuelLeftover" in params else None,
+            "remainingRangeKm": _as_int(params.get("remainedOilMile")) if "remainedOilMile" in params else None,
+        }
+    normalize_condition_fuel(condition)
     if any(
         key in params
         for key in (
