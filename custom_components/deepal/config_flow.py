@@ -55,6 +55,7 @@ COUNTRY_OPTIONS = {
     "ES": "Spain (+34)",
     "IT": "Italy (+39)",
     "NL": "Netherlands (+31)",
+    "BE": "Belgium (+32)",
     "AU": "Australia (+61)",
 }
 
@@ -65,6 +66,7 @@ COUNTRY_DIAL_CODES = {
     "ES": "34",
     "IT": "39",
     "NL": "31",
+    "BE": "32",
     "AU": "61",
 }
 

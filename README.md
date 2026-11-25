@@ -22,7 +22,7 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 
 - Deepal S07: telemetry and optional remote controls.
 - Deepal S05: telemetry and optional remote controls (no charge limit or charging schedule).
-- Login regions: United Kingdom, Israel, Portugal, Spain, Italy, Netherlands, Australia
+- Login regions: United Kingdom, Israel, Portugal, Spain, Italy, Netherlands, Belgium, Australia. Netherlands-delivered vehicles are often registered under Belgium (`BE`); a Dutch-dealer account can return "Account not registered" for the Netherlands and succeed when the login region is Belgium. Belgium uses the European gateway.
 
 ## Current Features
 
@@ -80,6 +80,8 @@ No control PIN is required. Home Assistant then exposes a device tracker with th
 - The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry, and re-reads it after each command.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
+- Belgium (`BE`, +32) is a European login region. Netherlands-delivered vehicles are often registered under Belgium (`BE`) rather than the Netherlands.
+- If an S05 login works but MQTT setup fails (`APIGW_-1_7_01_004 invalided token`, or the broker times out), telemetry uses the REST condition instead. MQTT is retried after 5 minutes, then 15, then every 30 minutes. An authentication error still refreshes the session and is not hidden by that fallback. A car that is simply offline stays unavailable until the next poll, including when that happens just after a token refresh.
 
 ## Development Status
 

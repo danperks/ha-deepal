@@ -29,6 +29,7 @@ from .const import (
     REGION_GATEWAYS,
     REQUEST_ENCRYPTION_PUBLIC_KEY,
 )
+from .error_codes import command_result_detail
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -316,6 +317,38 @@ def _s05_command_response_items(payload: dict[str, Any], secret_key: str, req_id
     return items
 
 
+def _format_s05_command_failure(code: Any, message: str) -> str:
+    """Describe an S05 command rejection. The numeric code is always included.
+
+    A non-empty vehicle sentence wins over the lookup tables. Known machine
+    codes such as ``VVCC_-1_-1_02_023`` still expand when that sentence is absent.
+    """
+    text = message.strip()
+    code_text = str(code).strip()
+    for error_code, detail in _S05_VEHICLE_ERROR_MESSAGES.items():
+        if error_code == code_text or (text and error_code in text):
+            if text and error_code not in text and text != code_text:
+                return f"{text} ({code})"
+            return f"{detail} ({error_code})"
+    detail = command_result_detail(code, text or None)
+    if detail:
+        return f"{detail} ({code})"
+    return f"result code {code}"
+
+
+def _s05_command_failure_from_item(item: dict[str, Any]) -> str:
+    """Format a ``success: false`` item, including its result code when present."""
+    message = str(item.get("msg") or item.get("message") or "")
+    code = None
+    for key in ("resultCode", "result_code", "code"):
+        if key in item and item.get(key) not in (None, ""):
+            code = item.get(key)
+            break
+    if code is None or code in _S05_SUCCESS_CODES:
+        return message.strip() or "vehicle rejected the command"
+    return _format_s05_command_failure(code, message)
+
+
 def _s05_command_result_error(items: list[dict[str, Any]], payload: dict[str, Any]) -> str | None:
     """Return an explicit vehicle error from a correlated S05 command response."""
     candidates: list[dict[str, Any]] = [payload, *items]
@@ -329,18 +362,16 @@ def _s05_command_result_error(items: list[dict[str, Any]], payload: dict[str, An
 
     for item in candidates:
         if item.get("success") is False:
-            return str(item.get("msg") or item.get("message") or "vehicle rejected the command")
+            return _s05_command_failure_from_item(item)
         if item.get("success") is True:
             continue
         for key in ("resultCode", "result_code", "code"):
+            if key not in item:
+                continue
             code = item.get(key)
             if code in _S05_SUCCESS_CODES:
                 continue
-            message = str(item.get("msg") or item.get("message") or "")
-            for error_code, detail in _S05_VEHICLE_ERROR_MESSAGES.items():
-                if error_code == str(code) or error_code in message:
-                    return f"{detail} ({error_code})"
-            return message or f"result code {code}"
+            return _format_s05_command_failure(code, str(item.get("msg") or item.get("message") or ""))
     return None
 
 
