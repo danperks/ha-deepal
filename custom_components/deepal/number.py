@@ -92,7 +92,10 @@ class DeepalSeatLevelNumber(DeepalEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         client = self.coordinator.client
-        control = client.control_seats_heat if self._function == "heat" else client.control_seats_wind
+        if self.coordinator.vehicle_uses_mqtt:
+            control = client.s05_control_seats_heat if self._function == "heat" else client.s05_control_seats_wind
+        else:
+            control = client.control_seats_heat if self._function == "heat" else client.control_seats_wind
         level = max(0, min(3, int(value)))
         try:
             await self.async_execute_command(

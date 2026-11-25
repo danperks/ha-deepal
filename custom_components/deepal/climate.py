@@ -139,9 +139,15 @@ class DeepalClimate(_TemperatureProperties, DeepalEntity, ClimateEntity):
         await self._async_send(enabled=False, target_temperature=self._target_temperature_c() or 21)
 
     async def _async_send(self, *, enabled: bool, target_temperature: float) -> None:
+        client = self.coordinator.client
+        control = (
+            client.s05_control_air_conditioner
+            if self.coordinator.vehicle_uses_mqtt
+            else client.control_air_conditioner
+        )
         try:
             await self.async_execute_command(
-                lambda: self.coordinator.client.control_air_conditioner(
+                lambda: control(
                     vehicle_id=self.coordinator.vehicle_id,
                     enabled=enabled,
                     target_temp_c=target_temperature,

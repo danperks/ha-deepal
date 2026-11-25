@@ -42,6 +42,11 @@ _S05_OPEN = 1
 _S05_CLOSE = 2
 _S05_POSITION_OPEN = 100
 _S05_POSITION_CLOSED = 0
+# EU app AUTOMATIC_TIME floor. The S07 REST climate command keeps its own 30 minute default.
+_S05_REMOTE_RUN_MINUTES = 15
+# S05 MQTT telemetry uses 2 for on and 1 for off (observed 2026-11-20), unlike the head-unit property enum.
+_S05_STEERING_ON = 2
+_S05_STEERING_OFF = 1
 _S05_WAKE_SETTLE_SECONDS = 2
 _S05_COMMAND_TIMEOUT = 45
 _S05_SUCCESS_CODES = (None, "", 0, "0", "000000", 200, "200", "OK", "SUCCESS", "success")
@@ -1276,6 +1281,63 @@ class DeepalClient:
                 "ReqTypeDoor": _S05_OPEN if open_value else _S05_CLOSE,
                 "TarPosnPerc": _S05_POSITION_OPEN if open_value else _S05_POSITION_CLOSED,
             },
+        )
+
+    async def s05_control_air_conditioner(
+        self,
+        *,
+        vehicle_id: str,
+        enabled: bool,
+        target_temp_c: float,
+    ) -> str:
+        """Start or stop cabin climate on an MQTT-backed vehicle.
+
+        One user action publishes one command. Turning the cabin on sends the
+        driver-zone setpoint in degrees plus the remote run timer. Turning it
+        off sends ``Cnr_AllAcOff`` with no parameters.
+        """
+        if enabled:
+            return await self._s05_mqtt_command(
+                vehicle_id,
+                service_code="AC",
+                method="Cnr_DrACTemp",
+                params={
+                    "ACTempSet": float(target_temp_c),
+                    "SetTime": _S05_REMOTE_RUN_MINUTES,
+                },
+            )
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="AC",
+            method="Cnr_AllAcOff",
+            params={},
+        )
+
+    async def s05_control_seats_heat(self, *, vehicle_id: str, driver: bool, level: int) -> str:
+        """Set a front seat heater on an MQTT-backed vehicle. Level 0 is off."""
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="Seat",
+            method="Cnr_DrSeatHeat" if driver else "Cnr_PsgSeatHeat",
+            params={"SeatHeat": int(level), "SetTime": _S05_REMOTE_RUN_MINUTES},
+        )
+
+    async def s05_control_seats_wind(self, *, vehicle_id: str, driver: bool, level: int) -> str:
+        """Set front seat ventilation on an MQTT-backed vehicle. Level 0 is off."""
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="Seat",
+            method="Cnr_DrSeatVent" if driver else "Cnr_PsgSeatVent",
+            params={"SeatVent": int(level), "SetTime": _S05_REMOTE_RUN_MINUTES},
+        )
+
+    async def s05_control_steering_wheel_heat(self, *, vehicle_id: str, open_value: bool) -> str:
+        """Turn steering-wheel heat on or off on an MQTT-backed vehicle."""
+        return await self._s05_mqtt_command(
+            vehicle_id,
+            service_code="TxSteering",
+            method="Cnr_TxSteeringHeat",
+            params={"SteeringHeat": _S05_STEERING_ON if open_value else _S05_STEERING_OFF},
         )
 
     async def _s05_mqtt_command(

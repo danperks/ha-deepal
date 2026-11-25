@@ -8,7 +8,7 @@
 
 Custom Home Assistant integration for the Changan Deepal cloud API.
 
-This integration was built against a UK-market Deepal S07 and a Portugal-market Deepal S05. Both support telemetry and, when enabled, remote controls. S05 telemetry and door, window, and boot controls use the app's MQTT path.
+This integration was built against a UK-market Deepal S07 and a Portugal-market Deepal S05. Both support telemetry and, when enabled, remote controls. S05 telemetry uses the app's MQTT path. S05 door, window, boot, cabin climate, seat heating and ventilation, and steering-wheel heating do too: each control wakes the car, then publishes one VDP command.
 
 ## Important Warnings
 
@@ -31,17 +31,17 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 - Vehicle telemetry sensors and binary sensors.
 - Vehicle image URL sensor from the Deepal vehicle metadata.
 - Manual refresh button.
-- Cabin climate control.
+- Cabin climate control. On the S05, turning it on sends the driver-zone setpoint in degrees with a 15-minute run time, and turning it off sends one empty stop command.
 - Door lock, window, and boot controls. On the S05 these wake the car first and wait for its response.
-- Flash lights and horn buttons.
-- Driver and front passenger seat heating and ventilation levels.
-- Steering wheel heating switch.
-- S07 charge limit and charging schedule controls.
+- Flash lights and horn buttons on the S07. These stay on the S07 REST path. The S05 seek-car request values are not implemented.
+- Driver and front passenger seat heating and ventilation levels. On the S05 each level, including off, is one MQTT command with a 15-minute run time.
+- Steering wheel heating switch. On the S05 the command sends 2 for on and 1 for off.
+- S07 charge limit and charging schedule controls. The S05 does not expose these.
 - S05 plug-in hybrid fuel level, fuel volume, and fuel range. Those sensors appear only when the car reports fuel, so battery-electric cars do not get empty fuel entities.
 - A tyre-pressure warning for each wheel.
 - Vehicle location device tracker, after the head unit's location permission is authorised.
 
-S05 controls are new and have only been tested on a few cars, so please report anything that doesn't work.
+S05 door, window, and boot controls have been tried on a few cars. S05 climate, seat, and steering commands follow the EU app's VDP builders and have not been sent to a car from this integration. Please report anything that doesn't work.
 
 ## Installation
 
@@ -81,6 +81,8 @@ No control PIN is required. Home Assistant then exposes a device tracker with th
 
 - The integration polls cached cloud status every minute. S07 can also ask for refreshed vehicle data every 5 minutes when remote commands are enabled. S05 reads refreshed MQTT telemetry, and re-reads it after each command.
 - After a command is accepted, the integration briefly polls for command result and refreshed vehicle state so Home Assistant updates faster than the normal polling interval.
+- S05 cabin temperature is sent in degrees (`ACTempSet`), not the tenths used by the S07 REST command. The EU app names its all-on parameter `ACReq`. This integration starts the cabin with the driver temperature command, so one action carries both the setpoint and the 15-minute timer, and stops it with `Cnr_AllAcOff` and empty parameters. The app's remote range is about 18–32°C. The Home Assistant entity still accepts 16–30°C.
+- S05 steering-wheel telemetry uses 2 for on and 1 or 0 for off. The switch follows that encoding. The diagnostic sensor still shows the S07 level names for the raw value.
 - If the account is used elsewhere, Home Assistant may need reauthentication.
 - Belgium (`BE`, +32) is a European login region. Netherlands-delivered vehicles are often registered under Belgium (`BE`) rather than the Netherlands.
 - If an S05 login works but MQTT setup fails (`APIGW_-1_7_01_004 invalided token`, or the broker times out), telemetry uses the REST condition instead. MQTT is retried after 5 minutes, then 15, then every 30 minutes. An authentication error still refreshes the session and is not hidden by that fallback. A car that is simply offline stays unavailable until the next poll, including when that happens just after a token refresh.
@@ -97,4 +99,4 @@ This integration is much better thanks to work from the community:
 - [@kobizz](https://github.com/kobizz) for the S05 gateway token fix and the S05 door, window, and boot controls.
 - [@BeauGiles](https://github.com/BeauGiles) for remote command signing and control PIN fixes, transient request retries, the reauthenticate option, and repair flow.
 - [@DylanTusler](https://github.com/DylanTusler) for Australian login support via the Singapore gateway.
-- The [ha-deepal-alternative](https://github.com/Sunek0/ha-deepal-alternative) contributors, whose research informed the S05 gateway token handling, S05 climate and light controls, and the seat and steering wheel controls.
+- The [ha-deepal-alternative](https://github.com/Sunek0/ha-deepal-alternative) contributors, whose research informed the S05 gateway token handling, S05 climate and light telemetry, the seat and steering wheel status mapping, and the steering-wheel on/off encoding.
