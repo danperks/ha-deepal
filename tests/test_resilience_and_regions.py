@@ -1,4 +1,7 @@
-"""Belgium login, S05 REST fallback, offline classification, and command wording."""
+"""Belgium login, S05 REST fallback, offline classification, and command wording.
+
+A healthy live MQTT snapshot is preferred over the one-shot REST backoff.
+"""
 
 from __future__ import annotations
 
@@ -111,6 +114,15 @@ class CommandResultWordingTests(unittest.TestCase):
         self.assertIsNone(_s05_command_result_error([{"code": "000000"}], {}))
 
 
+class _LiveSnapshot:
+    def __init__(self, condition: dict | None, *, healthy: bool = True) -> None:
+        self.healthy = healthy
+        self.condition = condition
+
+    def latest_condition(self) -> dict | None:
+        return self.condition
+
+
 class _MqttClient:
     def __init__(self) -> None:
         self.commands_enabled = False
@@ -121,6 +133,7 @@ class _MqttClient:
         self.auth_error = False
         self.mqtt_error = _INVALID_TOKEN
         self.rest_error: str | None = None
+        self.live_mqtt: _LiveSnapshot | None = None
 
     async def vehicles(self) -> list[dict]:
         return [{"carId": "veh-1", "protocolType": "MQTT", "imgUrl": "https://cdn.example/a.png"}]
@@ -316,6 +329,44 @@ class ResilienceCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(coordinator._mqtt_failures, 1)
         self.assertEqual(client.mqtt_calls, 1)
         self.assertEqual(client.rest_calls, 1)
+
+    async def test_healthy_live_snapshot_clears_backoff_before_rest(self) -> None:
+        """A healthy push snapshot wins over an active MQTT retry window."""
+        client = _MqttClient()
+        client.live_mqtt = _LiveSnapshot({"src": "live", "vehicleStatus": {"soc": 90}})
+        coordinator = self._coordinator(client)
+        coordinator._mqtt_failures = 2
+        coordinator._mqtt_retry_after = asyncio.get_running_loop().time() + 10_000
+        vehicles, condition = await coordinator._async_fetch()
+        self.assertEqual(condition["src"], "live")
+        self.assertEqual(vehicles[0]["imgUrl"], "https://cdn.example/a.png")
+        self.assertEqual(coordinator._mqtt_failures, 0)
+        self.assertEqual(coordinator._mqtt_retry_after, 0.0)
+        self.assertEqual(client.mqtt_calls, 0)
+        self.assertEqual(client.rest_calls, 0)
+
+    async def test_empty_or_unhealthy_live_session_keeps_rest_backoff(self) -> None:
+        """Backoff still skips one-shot MQTT when the live session has no snapshot."""
+        loop = asyncio.get_running_loop()
+        for snapshot in (
+            _LiveSnapshot({}, healthy=True),
+            _LiveSnapshot(None, healthy=True),
+            _LiveSnapshot({"src": "live"}, healthy=False),
+            None,
+        ):
+            with self.subTest(snapshot=snapshot.condition if snapshot else None, healthy=getattr(snapshot, "healthy", None)):
+                client = _MqttClient()
+                client.live_mqtt = snapshot
+                coordinator = self._coordinator(client)
+                coordinator._mqtt_failures = 1
+                retry_after = loop.time() + 10_000
+                coordinator._mqtt_retry_after = retry_after
+                _, condition = await coordinator._async_fetch()
+                self.assertEqual(condition["src"], "rest")
+                self.assertEqual(client.mqtt_calls, 0)
+                self.assertEqual(client.rest_calls, 1)
+                self.assertEqual(coordinator._mqtt_failures, 1)
+                self.assertEqual(coordinator._mqtt_retry_after, retry_after)
 
     async def test_direct_offline_error_stays_update_failed(self) -> None:
         client = _HttpClient()

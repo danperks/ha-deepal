@@ -74,6 +74,7 @@
           "control_pin": "Control PIN",
           "enable_commands": "Enable remote commands",
           "enable_api_logging": "Enable redacted API logging",
+          "enable_live_mqtt": "Live MQTT updates (S05)",
           "qr_auth_url": "Location permission QR URL",
           "reauthenticate": "Reauthenticate now"
         },
@@ -83,6 +84,7 @@
           "control_pin": "The same PIN used for remote controls in the official Deepal app. Required when remote commands are enabled.",
           "enable_commands": "Allow Home Assistant to send signed commands such as refresh, lock, climate, charging, windows, boot, seat and steering wheel heating, lights, and horn.",
           "enable_api_logging": "Write redacted Deepal API requests and responses to the Home Assistant log for troubleshooting. Tokens, PINs, signatures, keys, and account identifiers are filtered, but vehicle data may still appear. Leave disabled unless debugging.",
+          "enable_live_mqtt": "Keep one MQTT connection open for an S05 (protocol MQTT) and apply property updates as they arrive. Off by default. S07 and other non-MQTT vehicles ignore this. While the session is connected, Home Assistant does not open a second MQTT connection on each poll.",
           "reauthenticate": "Log in again to register a fresh command-signing key without removing the integration. Use this if remote commands fail while vehicle data still updates. Other changes in the same submission are ignored.",
           "qr_auth_url": "Paste the QR link from the car head unit (Privacy → Location permission), or the bare qrCode token. Leave blank to skip. This is not stored."
         }
