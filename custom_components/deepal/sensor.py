@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import math
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfLength, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.const import PERCENTAGE, UnitOfLength, UnitOfTemperature, UnitOfVolume
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .api import cabin_humidity_percent, normalize_condition_fuel, remaining_charge_minutes
 from .coordinator import DeepalDataUpdateCoordinator
 from .entity import DeepalEntity
 
@@ -93,6 +95,9 @@ SENSOR_NAMES = {
     "tire_right_front_pressure": "Right front tire pressure",
     "tire_left_rear_pressure": "Left rear tire pressure",
     "tire_right_rear_pressure": "Right rear tire pressure",
+    "fuel_level": "Fuel level",
+    "fuel_volume": "Fuel volume",
+    "fuel_range": "Fuel range",
     "driver_seat_heater_level": "Driver seat heater level",
     "front_passenger_seat_heater_level": "Front passenger seat heater level",
     "left_rear_seat_heater_level": "Left rear seat heater level",
@@ -281,6 +286,31 @@ SENSORS: tuple[DeepalSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         path=("tire", "rightBack", "pressure"),
     ),
+    # S05 PHEV only. Created when the condition actually contains fuel readings,
+    # so an S07 or S05 BEV does not keep three unknown fuel entities.
+    DeepalSensorDescription(
+        key="fuel_level",
+        translation_key="fuel_level",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        path=("fuel", "levelPercent"),
+    ),
+    DeepalSensorDescription(
+        key="fuel_volume",
+        translation_key="fuel_volume",
+        native_unit_of_measurement=UnitOfVolume.LITERS,
+        device_class=SensorDeviceClass.VOLUME_STORAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        path=("fuel", "volumeL"),
+    ),
+    DeepalSensorDescription(
+        key="fuel_range",
+        translation_key="fuel_range",
+        native_unit_of_measurement=UnitOfLength.KILOMETERS,
+        device_class=SensorDeviceClass.DISTANCE,
+        state_class=SensorStateClass.MEASUREMENT,
+        path=("fuel", "remainingRangeKm"),
+    ),
     DeepalSensorDescription(
         key="driver_seat_heater_level",
         translation_key="driver_seat_heater_level",
@@ -346,11 +376,85 @@ SENSORS: tuple[DeepalSensorDescription, ...] = (
 )
 
 
+_FUEL_SENSOR_FIELDS = {
+    "fuel_level": "levelPercent",
+    "fuel_volume": "volumeL",
+    "fuel_range": "remainingRangeKm",
+}
+_PERCENT_SENSOR_KEYS = frozenset({"soc", "charge_limit", "fuel_level"})
+_DC_SENTINEL_SENSOR_KEYS = frozenset({"dc_charge_current", "charge_current"})
+
+
+def _condition_from_coordinator(coordinator: DeepalDataUpdateCoordinator) -> dict[str, Any]:
+    condition = (coordinator.data or {}).get("condition") or {}
+    return condition if isinstance(condition, dict) else {}
+
+
+def fuel_sensor_has_data(condition: dict[str, Any], key: str) -> bool:
+    """Return whether this fuel sensor has a reading to show."""
+    fuel = condition.get("fuel")
+    if not isinstance(fuel, dict):
+        return False
+    return fuel.get(_FUEL_SENSOR_FIELDS[key]) is not None
+
+
+def _finite_measurement(value: Any) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _percent_measurement(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if value < 0 or value > 100:
+        return None
+    return value
+
+
+def _is_dc_current_sentinel(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return float(value) == -400.0
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: DeepalDataUpdateCoordinator = entry.runtime_data
+    added_fuel: set[str] = set()
+
+    def _new_fuel_entities() -> list[DeepalSensor]:
+        condition = _condition_from_coordinator(coordinator)
+        normalize_condition_fuel(condition)
+        entities: list[DeepalSensor] = []
+        for description in SENSORS:
+            if description.key not in _FUEL_SENSOR_FIELDS or description.key in added_fuel:
+                continue
+            if fuel_sensor_has_data(condition, description.key):
+                added_fuel.add(description.key)
+                entities.append(DeepalSensor(coordinator, description))
+        return entities
+
     async_add_entities(
-        [*(DeepalSensor(coordinator, description) for description in SENSORS), DeepalRawConditionSensor(coordinator)]
+        [
+            *(
+                DeepalSensor(coordinator, description)
+                for description in SENSORS
+                if description.key not in _FUEL_SENSOR_FIELDS
+            ),
+            DeepalRawConditionSensor(coordinator),
+            *_new_fuel_entities(),
+        ]
     )
+
+    @callback
+    def _async_add_fuel_sensors() -> None:
+        entities = _new_fuel_entities()
+        if entities:
+            async_add_entities(entities)
+
+    entry.async_on_unload(coordinator.async_add_listener(_async_add_fuel_sensors))
 
 
 class DeepalSensor(DeepalEntity, SensorEntity):
@@ -382,7 +486,24 @@ class DeepalSensor(DeepalEntity, SensorEntity):
         if self.entity_description.timestamp_ms:
             return _millis_to_datetime(_path_value(self.condition, self.entity_description.path))
         value = _path_value(self.condition, self.entity_description.path)
-        if self.entity_description.divide_by and isinstance(value, int | float):
+        if self.entity_description.key == "cabin_humidity":
+            return cabin_humidity_percent(value)
+        if self.entity_description.key == "remaining_charge_time":
+            charge = self.condition.get("charge") or {}
+            return remaining_charge_minutes(
+                value,
+                actively_charging=charge.get("chargeStatus") not in (None, 0),
+            )
+        if self.entity_description.key in _DC_SENTINEL_SENSOR_KEYS and _is_dc_current_sentinel(value):
+            return None
+        if self.entity_description.key in _PERCENT_SENSOR_KEYS:
+            return _percent_measurement(value)
+        value = _finite_measurement(value)
+        if (
+            self.entity_description.divide_by
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+        ):
             return value / self.entity_description.divide_by
         return value
 

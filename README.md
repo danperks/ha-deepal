@@ -37,6 +37,8 @@ This integration was built against a UK-market Deepal S07 and a Portugal-market 
 - Driver and front passenger seat heating and ventilation levels.
 - Steering wheel heating switch.
 - S07 charge limit and charging schedule controls.
+- S05 plug-in hybrid fuel level, fuel volume, and fuel range. Those sensors appear only when the car reports fuel, so battery-electric cars do not get empty fuel entities.
+- A tyre-pressure warning for each wheel.
 - Vehicle location device tracker, after the head unit's location permission is authorised.
 
 S05 controls are new and have only been tested on a few cars, so please report anything that doesn't work.
@@ -82,6 +84,7 @@ No control PIN is required. Home Assistant then exposes a device tracker with th
 - If the account is used elsewhere, Home Assistant may need reauthentication.
 - Belgium (`BE`, +32) is a European login region. Netherlands-delivered vehicles are often registered under Belgium (`BE`) rather than the Netherlands.
 - If an S05 login works but MQTT setup fails (`APIGW_-1_7_01_004 invalided token`, or the broker times out), telemetry uses the REST condition instead. MQTT is retried after 5 minutes, then 15, then every 30 minutes. An authentication error still refreshes the session and is not hidden by that fallback. A car that is simply offline stays unavailable until the next poll, including when that happens just after a token refresh.
+- Readings the car uses as placeholders (a non-finite number, a state of charge outside 0–100%, an 8191-minute charge estimate, or a -400 A wake current) are shown as unknown.
 
 ## Development Status
 

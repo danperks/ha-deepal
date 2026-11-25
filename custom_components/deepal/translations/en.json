@@ -152,6 +152,9 @@
       "tire_right_front_pressure": {"name": "Right front tire pressure"},
       "tire_left_rear_pressure": {"name": "Left rear tire pressure"},
       "tire_right_rear_pressure": {"name": "Right rear tire pressure"},
+      "fuel_level": {"name": "Fuel level"},
+      "fuel_volume": {"name": "Fuel volume"},
+      "fuel_range": {"name": "Fuel range"},
       "driver_seat_heater_level": {"name": "Driver seat heater level"},
       "front_passenger_seat_heater_level": {"name": "Front passenger seat heater level"},
       "left_rear_seat_heater_level": {"name": "Left rear seat heater level"},
@@ -192,7 +195,11 @@
       "driver_seat_heater_on": {"name": "Driver seat heater on"},
       "front_passenger_seat_heater_on": {"name": "Front passenger seat heater on"},
       "driver_seat_ventilation_on": {"name": "Driver seat ventilation on"},
-      "front_passenger_seat_ventilation_on": {"name": "Front passenger seat ventilation on"}
+      "front_passenger_seat_ventilation_on": {"name": "Front passenger seat ventilation on"},
+      "tire_left_front_warning": {"name": "Left front tire pressure warning"},
+      "tire_right_front_warning": {"name": "Right front tire pressure warning"},
+      "tire_left_rear_warning": {"name": "Left rear tire pressure warning"},
+      "tire_right_rear_warning": {"name": "Right rear tire pressure warning"}
     },
     "lock": {
       "doors": {"name": "Doors"}
