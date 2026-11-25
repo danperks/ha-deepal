@@ -88,7 +88,15 @@ class DeepalSteeringWheelHeatSwitch(DeepalEntity, SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         value = (self.condition.get("vehicleStatus") or {}).get("steeringWheelHeater")
-        return bool(value) if value is not None else None
+        if value is None:
+            return None
+        # S05 telemetry stores the raw enum: 2 is on, and 1 or 0 is off.
+        if self.coordinator.vehicle_uses_mqtt:
+            try:
+                return int(value) >= 2
+            except (TypeError, ValueError):
+                return None
+        return bool(value)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._async_control(open_value=True)
@@ -97,12 +105,15 @@ class DeepalSteeringWheelHeatSwitch(DeepalEntity, SwitchEntity):
         await self._async_control(open_value=False)
 
     async def _async_control(self, *, open_value: bool) -> None:
+        client = self.coordinator.client
+        control = (
+            client.s05_control_steering_wheel_heat
+            if self.coordinator.vehicle_uses_mqtt
+            else client.control_steering_wheel_heat
+        )
         try:
             await self.async_execute_command(
-                lambda: self.coordinator.client.control_steering_wheel_heat(
-                    vehicle_id=self.coordinator.vehicle_id,
-                    open_value=open_value,
-                ),
+                lambda: control(vehicle_id=self.coordinator.vehicle_id, open_value=open_value),
                 is_done=lambda: self.is_on is open_value,
             )
         except DeepalCommandAuthError as err:
